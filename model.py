@@ -12,14 +12,17 @@ class CNNAutoencoder(nn.Module):
         # Encoder
         self.encoder = nn.Sequential(
             nn.Conv1d(input_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
             
             nn.Conv1d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
             
             nn.Conv1d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
             
@@ -33,9 +36,11 @@ class CNNAutoencoder(nn.Module):
             nn.Unflatten(1, (128, sequence_length // 8)),
             
             nn.ConvTranspose1d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             
             nn.ConvTranspose1d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             
             nn.ConvTranspose1d(32, input_channels, kernel_size=3, stride=2, padding=1, output_padding=1),
