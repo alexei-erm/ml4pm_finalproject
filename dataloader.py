@@ -3,7 +3,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-class AlpiqDataset(Dataset):
+class Dataloader(Dataset):
     def __init__(self, parquet_path, info_csv_path, unit_id, operating_mode, window=50, stride=1, device='cpu'):
         """
         Args:
