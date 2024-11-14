@@ -66,6 +66,17 @@ class Dataloader(Dataset):
                 self.indices.append((seq_indices[i], seq_indices[i + window - 1]))
         
         self.indices = torch.tensor(self.indices).to(device)
+
+        # without 2x loops variation
+        # seq_indices_list = []
+        # for seq_id in valid_sequences.index:
+        #     seq_mask = sequence_ids == seq_id
+        #     seq_indices = df_filtered[seq_mask].index.values
+        #     starts = np.arange(0, len(seq_indices) - window + 1, stride)
+        #     ends = starts + window - 1
+        #     seq_indices_list.append(np.column_stack((seq_indices[starts], seq_indices[ends])))
+
+        # self.indices = torch.tensor(np.vstack(seq_indices_list)).to(device)
         
         # Convert to tensors
         self.X = torch.from_numpy(self.X).to(device)
