@@ -42,19 +42,11 @@ class Dataloader(Dataset):
         control_vars = [var for var in control_vars if var in df_filtered.columns]
         generator_vars = [var for var in generator_vars if var in df_filtered.columns]
         
+        # Prepare X and Y data
         self.X = np.array(df_filtered[control_vars].values).astype(np.float32)
         self.Y = np.array(df_filtered[generator_vars].values).astype(np.float32)
         
-        # Create sliding window indices
-        self.indices = self._get_sliding_indices()
-        
-        # Convert to tensors
-        self.X = torch.from_numpy(self.X).to(device)
-        self.Y = torch.from_numpy(self.Y).to(device)
-        
-         # [Previous initialization code until df_filtered]
-        
-        # Find continuous sequences by checking index gaps
+        # Find continuous sequences
         df_filtered = df_filtered.reset_index()
         index_diff = df_filtered.index.diff()
         sequence_breaks = index_diff != 1
@@ -75,9 +67,7 @@ class Dataloader(Dataset):
         
         self.indices = torch.tensor(self.indices).to(device)
         
-        # Rest remains the same
-        
-        # Prepare X and Y data
+        # Convert to tensors
         self.X = torch.from_numpy(self.X).to(device)
         self.Y = torch.from_numpy(self.Y).to(device)
 
@@ -89,6 +79,7 @@ class Dataloader(Dataset):
         x_seq = self.X[start_idx:end_idx+1]
         y_seq = self.Y[start_idx:end_idx+1]
         return x_seq, y_seq
+
 
 def create_dataloaders(dataset, batch_size=32, train_split=0.7, val_split=0.15, seed=42):
     """Creates train/validation/test DataLoaders with random splits"""
