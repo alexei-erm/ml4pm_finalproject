@@ -52,34 +52,30 @@ class Dataloader(Dataset):
         self.X = torch.from_numpy(self.X).to(device)
         self.Y = torch.from_numpy(self.Y).to(device)
         
-        # [Previous initialization code remains the same until df_filtered]
-
-        # Convert timestamp to datetime and sort
-        df_filtered['timestamp'] = pd.to_datetime(df_filtered['timestamp'])
-        df_filtered = df_filtered.sort_values('timestamp')
+         # [Previous initialization code until df_filtered]
         
-        # Find continuous sequences
-        time_diff = df_filtered['timestamp'].diff()
-        expected_diff = pd.Timedelta(seconds=30)  # 30-second intervals
-        sequence_breaks = time_diff != expected_diff
+        # Find continuous sequences by checking index gaps
+        df_filtered = df_filtered.reset_index()
+        index_diff = df_filtered.index.diff()
+        sequence_breaks = index_diff != 1
         sequence_ids = sequence_breaks.cumsum()
         
-        # Get valid sequences that are long enough for window
+        # Get valid sequences long enough for window
         valid_sequences = sequence_ids.value_counts()
         valid_sequences = valid_sequences[valid_sequences >= window]
         
-        # Create indices only for valid continuous sequences
+        # Create indices for continuous sequences only
         self.indices = []
         for seq_id in valid_sequences.index:
             seq_mask = sequence_ids == seq_id
             seq_indices = df_filtered[seq_mask].index
             
             for i in range(0, len(seq_indices) - window + 1, stride):
-                start_idx = seq_indices[i]
-                end_idx = seq_indices[i + window - 1]
-                self.indices.append((start_idx, end_idx))
+                self.indices.append((seq_indices[i], seq_indices[i + window - 1]))
         
         self.indices = torch.tensor(self.indices).to(device)
+        
+        # Rest remains the same
         
         # Prepare X and Y data
         self.X = torch.from_numpy(self.X).to(device)
