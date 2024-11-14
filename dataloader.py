@@ -5,42 +5,26 @@ from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 class Dataloader(Dataset):
     def __init__(self, parquet_path, info_csv_path, unit_id, operating_mode, window=50, stride=1, device='cpu'):
-        """
-        Args:
-            parquet_path: Path to measurements parquet file
-            info_csv_path: Path to info CSV file
-            unit_id: VG4, VG5, or VG6 
-            operating_mode: 'turbine_mode', 'pump_mode', or 'short_circuit_mode'
-            window: Sequence window length
-            stride: Window stride length
-            device: Computing device
-        """
         self.window = window
         self.stride = stride
         self.device = device
         
-        # Load data
-        df_measurements = pd.read_parquet(parquet_path)
-        df_info = pd.read_csv(info_csv_path)
-        df = pd.merge(df_measurements, df_info, on='timestamp')
+        # Load measurements
+        df_filtered = pd.read_parquet(parquet_path)
         
-        # Filter data for specific unit and operating mode
+        # Filter for operating mode
         mode_filter = f"equilibrium_{operating_mode}"
-        df_filtered = df[
-            (df['unit'] == unit_id) & 
-            (df[mode_filter] == True)
-        ]
+        df_filtered = df_filtered[df_filtered[mode_filter] == True]
         
-        # Separate control variables (X) and generator variables (Y)
+        # Define variable groups
         control_vars = ['tot_activepower', 'ext_tmp', 'plant_tmp', 'pump_rotspeed',
                         'turbine_rotspeed', 'turbine_pressure']
-        generator_vars = ['stat_coil_tmp', 'stat_magn_tmp', 'air_circ_hot_tmp',
-                        'air_circ_cold_tmp', 'water_circ_flow', 'water_circ_hot_tmp',
-                        'water_circ_cold_tmp']
         
-        # Handle missing columns for different units
+        generator_vars = [col for col in df_filtered.columns if any(x in col for x in 
+                        ['stat_coil', 'stat_magn', 'air_circ', 'water_circ'])]
+        
+        # Handle missing columns
         control_vars = [var for var in control_vars if var in df_filtered.columns]
-        generator_vars = [var for var in generator_vars if var in df_filtered.columns]
         
         # Prepare X and Y data
         self.X = np.array(df_filtered[control_vars].values).astype(np.float32)
@@ -52,31 +36,20 @@ class Dataloader(Dataset):
         sequence_breaks = index_diff != 1
         sequence_ids = sequence_breaks.cumsum()
         
-        # Get valid sequences long enough for window
-        valid_sequences = sequence_ids.value_counts()
-        valid_sequences = valid_sequences[valid_sequences >= window]
+        # Get valid sequences using pandas Series
+        sequence_counts = pd.Series(sequence_ids).value_counts()
+        valid_sequences = sequence_counts[sequence_counts >= window]
         
-        # Create indices for continuous sequences only
-        self.indices = []
+        # Create indices for continuous sequences
+        seq_indices_list = []
         for seq_id in valid_sequences.index:
             seq_mask = sequence_ids == seq_id
-            seq_indices = df_filtered[seq_mask].index
-            
-            for i in range(0, len(seq_indices) - window + 1, stride):
-                self.indices.append((seq_indices[i], seq_indices[i + window - 1]))
+            seq_indices = df_filtered[seq_mask].index.values
+            starts = np.arange(0, len(seq_indices) - window + 1, stride)
+            ends = starts + window - 1
+            seq_indices_list.append(np.column_stack((seq_indices[starts], seq_indices[ends])))
         
-        self.indices = torch.tensor(self.indices).to(device)
-
-        # without 2x loops variation
-        # seq_indices_list = []
-        # for seq_id in valid_sequences.index:
-        #     seq_mask = sequence_ids == seq_id
-        #     seq_indices = df_filtered[seq_mask].index.values
-        #     starts = np.arange(0, len(seq_indices) - window + 1, stride)
-        #     ends = starts + window - 1
-        #     seq_indices_list.append(np.column_stack((seq_indices[starts], seq_indices[ends])))
-
-        # self.indices = torch.tensor(np.vstack(seq_indices_list)).to(device)
+        self.indices = torch.tensor(np.vstack(seq_indices_list)).to(device)
         
         # Convert to tensors
         self.X = torch.from_numpy(self.X).to(device)
@@ -87,9 +60,10 @@ class Dataloader(Dataset):
     
     def __getitem__(self, idx):
         start_idx, end_idx = self.indices[idx]
-        x_seq = self.X[start_idx:end_idx+1]
+        x_seq = self.X[start_idx:end_idx+1]  # [window, features]
         y_seq = self.Y[start_idx:end_idx+1]
-        return x_seq, y_seq
+        # Return shape: [features, window]
+        return x_seq, y_seq  # No transpose here since model handles it
 
 
 def create_dataloaders(dataset, batch_size=32, train_split=0.7, val_split=0.15, seed=42):
