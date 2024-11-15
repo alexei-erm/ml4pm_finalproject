@@ -3,38 +3,55 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-class AlpiqDataset(Dataset):
+class Dataloader(Dataset):
     def __init__(self, parquet_path, info_csv_path, unit_id, operating_mode, window=50, stride=1, device='cpu'):
-        # [Previous initialization code remains the same until df_filtered]
-
-        # Convert timestamp to datetime and sort
-        df_filtered['timestamp'] = pd.to_datetime(df_filtered['timestamp'])
-        df_filtered = df_filtered.sort_values('timestamp')
+        self.window = window
+        self.stride = stride
+        self.device = device
         
-        # Find continuous sequences
-        time_diff = df_filtered['timestamp'].diff()
-        expected_diff = pd.Timedelta(seconds=30)  # 30-second intervals
-        sequence_breaks = time_diff != expected_diff
-        sequence_ids = sequence_breaks.cumsum()
+        # Load measurements
+        df_filtered = pd.read_parquet(parquet_path)
         
-        # Get valid sequences that are long enough for window
-        valid_sequences = sequence_ids.value_counts()
-        valid_sequences = valid_sequences[valid_sequences >= window]
+        # Filter for operating mode
+        mode_filter = f"equilibrium_{operating_mode}"
+        df_filtered = df_filtered[df_filtered[mode_filter] == True]
         
-        # Create indices only for valid continuous sequences
-        self.indices = []
-        for seq_id in valid_sequences.index:
-            seq_mask = sequence_ids == seq_id
-            seq_indices = df_filtered[seq_mask].index
-            
-            for i in range(0, len(seq_indices) - window + 1, stride):
-                start_idx = seq_indices[i]
-                end_idx = seq_indices[i + window - 1]
-                self.indices.append((start_idx, end_idx))
+        # Define variable groups
+        control_vars = ['tot_activepower', 'ext_tmp', 'plant_tmp', 'pump_rotspeed',
+                        'turbine_rotspeed', 'turbine_pressure']
         
-        self.indices = torch.tensor(self.indices).to(device)
+        generator_vars = [col for col in df_filtered.columns if any(x in col for x in 
+                        ['stat_coil', 'stat_magn', 'air_circ', 'water_circ'])]
+        
+        # Handle missing columns
+        control_vars = [var for var in control_vars if var in df_filtered.columns]
         
         # Prepare X and Y data
+        self.X = np.array(df_filtered[control_vars].values).astype(np.float32)
+        self.Y = np.array(df_filtered[generator_vars].values).astype(np.float32)
+        
+        # Find continuous sequences
+        df_filtered = df_filtered.reset_index()
+        index_diff = df_filtered.index.diff()
+        sequence_breaks = index_diff != 1
+        sequence_ids = sequence_breaks.cumsum()
+        
+        # Get valid sequences using pandas Series
+        sequence_counts = pd.Series(sequence_ids).value_counts()
+        valid_sequences = sequence_counts[sequence_counts >= window]
+        
+        # Create indices for continuous sequences
+        seq_indices_list = []
+        for seq_id in valid_sequences.index:
+            seq_mask = sequence_ids == seq_id
+            seq_indices = df_filtered[seq_mask].index.values
+            starts = np.arange(0, len(seq_indices) - window + 1, stride)
+            ends = starts + window - 1
+            seq_indices_list.append(np.column_stack((seq_indices[starts], seq_indices[ends])))
+        
+        self.indices = torch.tensor(np.vstack(seq_indices_list)).to(device)
+        
+        # Convert to tensors
         self.X = torch.from_numpy(self.X).to(device)
         self.Y = torch.from_numpy(self.Y).to(device)
 
@@ -43,10 +60,10 @@ class AlpiqDataset(Dataset):
     
     def __getitem__(self, idx):
         start_idx, end_idx = self.indices[idx]
-        x_seq = self.X[start_idx:end_idx+1]
+        x_seq = self.X[start_idx:end_idx+1]  # [window, features]
         y_seq = self.Y[start_idx:end_idx+1]
-        return x_seq, y_seq
-    
+        # Return shape: [features, window]
+        return x_seq, y_seq  # No transpose here since model handles it
 
 
 def create_dataloaders(dataset, batch_size=32, train_split=0.7, val_split=0.15, seed=42):
