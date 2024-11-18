@@ -3,7 +3,7 @@ import random
 import numpy as np
 
 
-def set_seed(seed: int) -> None:
+def seed_all(seed: int) -> None:
     """
     Seeds all RNGs for all used libraries
     """
@@ -38,10 +38,8 @@ def select_device() -> torch.device:
     """
 
     if mps_is_available():
-        device = "mps"
+        return torch.device("mps")
     elif torch.cuda.is_available():
-        device = "cuda"
+        return torch.device("cuda")
     else:
-        device = "cpu"
-
-    return torch.device(device)
+        return torch.device("cpu")

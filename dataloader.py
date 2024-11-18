@@ -2,24 +2,26 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, SequentialSampler
 
 
-class RawDataset(Dataset):
+class SlidingDataset(Dataset):
     def __init__(
         self,
         unit: Literal["VG4", "VG5", "VG6"],
+        dataset_type: Literal["training", "testing_synthetic_01", "testing_synthetic_02", "testing_real"],
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         equilibrium: bool = True,
         dataset_folder: str = "Dataset",
-        window: int = 50,
+        window_size: int = 50,
         device: torch.device = torch.device("cpu"),
-    ):
-        self.window = window
+    ) -> None:
+        assert window_size >= 1
+        self.window_size = window_size
         self.device = device
 
-        # Load files
-        pq_path = f"{dataset_folder}/{unit}_generator_data_training_measurements.parquet"
+        # Load file
+        pq_path = f"{dataset_folder}/{unit}_generator_data_{dataset_type}_measurements.parquet"
         df = pd.read_parquet(pq_path)
 
         # Filter operating mode
@@ -49,65 +51,44 @@ class RawDataset(Dataset):
         df.drop(columns=df.columns[injector_columns_mask], inplace=True)
         df["total_injector_opening"] = total_injector_opening
 
-        # FIXME: this whole thing does not work
+        # Compute subsequence indices
+        valid_end_indices = (
+            df.index.to_series()
+            .diff(periods=self.window_size - 1)
+            .eq((self.window_size - 1) * pd.Timedelta(seconds=30))
+        )
+        start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
+        self.start_indices = torch.from_numpy(start_indices)
 
-        # Find contiguous sequences
-        df = df.reset_index()
-        index_diff = df.index.diff()
-        sequence_breaks = index_diff != 1
-        sequence_ids = sequence_breaks.cumsum()
-        print(sequence_ids)
-
-        # Get valid sequences using pandas Series
-        sequence_counts = pd.Series(sequence_ids).value_counts()
-        valid_sequences = sequence_counts[sequence_counts >= window]
-
-        # Create indices for continuous sequences
-        seq_indices_list = []
-        print(len(valid_sequences.index))
-        exit()
-        for seq_id in valid_sequences.index:
-            seq_mask = sequence_ids == seq_id
-            seq_indices = df[seq_mask].index.values
-            starts = np.arange(0, len(seq_indices) - window + 1)
-            ends = starts + window - 1
-            seq_indices_list.append(np.column_stack((seq_indices[starts], seq_indices[ends])))
-
-        self.indices = torch.tensor(np.vstack(seq_indices_list)).to(device)
-
-        # Convert to tensors
+        # Convert to tensor and normalize
         self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
+        self.measurements = self.measurements.T
+        mean = self.measurements.mean(dim=1, keepdim=True)
+        std = self.measurements.std(dim=1, keepdim=True)
+        self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
 
-    def __len__(self):
-        return len(self.indices)
+    def __len__(self) -> int:
+        return len(self.start_indices)
 
-    def __getitem__(self, idx):
-        start_idx, end_idx = self.indices[idx]
-        x_seq = self.X[start_idx : end_idx + 1]  # [window, features]
-        y_seq = self.Y[start_idx : end_idx + 1]
-        # Return shape: [features, window]
-        return x_seq, y_seq  # No transpose here since model handles it
+    def __getitem__(self, idx: int) -> torch.tensor:
+        start_index = self.start_indices[idx]
+        return self.measurements[:, start_index : start_index + self.window_size]
 
 
-def create_dataloaders(dataset, batch_size=32, train_split=0.7, val_split=0.15, seed=42):
-    """Creates train/validation/test DataLoaders with random splits"""
+def create_dataloaders(
+    dataset: Dataset, batch_size: int = 256, validation_split: float = 0.2
+) -> tuple[DataLoader, DataLoader]:
+    """Creates train/validation DataLoaders"""
 
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
-    n_samples = len(dataset)
-    train_size = int(train_split * n_samples)
-    val_size = int(val_split * n_samples)
-
-    indices = list(range(n_samples))
+    num_samples = len(dataset)
+    validation_size = int(validation_split * num_samples)
+    indices = np.arange(num_samples)
     np.random.shuffle(indices)
-
-    train_indices = indices[:train_size]
-    val_indices = indices[train_size : train_size + val_size]
-    test_indices = indices[train_size + val_size :]
+    train_indices = indices[:-validation_size]
+    validation_indices = indices[-validation_size:]
 
     train_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices))
-    val_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(val_indices))
-    test_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(test_indices))
+    # FIXME
+    validation_loader = DataLoader(dataset, batch_size=batch_size, sampler=SequentialSampler(validation_indices))
 
-    return train_loader, val_loader, test_loader
+    return train_loader, validation_loader
