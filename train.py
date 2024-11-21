@@ -8,7 +8,7 @@ def train_autoencoder(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    n_epochs: int = 150,
+    n_epochs: int = 200,
     learning_rate: float = 1e-3,
     patience: int = 5,
     min_delta: float = 1e-3,

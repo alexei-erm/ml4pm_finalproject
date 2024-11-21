@@ -7,9 +7,9 @@ class ConvolutionalAutoencoder(nn.Module):
     def __init__(self, input_channels: int, input_length: int) -> None:
         super(ConvolutionalAutoencoder, self).__init__()
 
-        kernel_size = 7
-        channels = [32, 32, 64, 64]
-        latent_features = 128
+        kernel_size = 5
+        channels = [128, 200, 256, 256]
+        latent_features = 512
         padding = kernel_size // 2
 
         def conv_layer(in_channels, out_channels):

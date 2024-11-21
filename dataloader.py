@@ -13,7 +13,7 @@ class SlidingDataset(Dataset):
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         equilibrium: bool = True,
         dataset_folder: str = "Dataset",
-        window_size: int = 50,
+        window_size: int = 64,
         device: torch.device = torch.device("cpu"),
     ) -> None:
         assert window_size >= 1
