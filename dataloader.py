@@ -13,6 +13,7 @@ class SlidingDataset(Dataset):
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         equilibrium: bool = True,
         dataset_folder: str = "Dataset",
+        parquet_file: str | None = None,
         window_size: int = 50,
         device: torch.device = torch.device("cpu"),
     ) -> None:
@@ -21,8 +22,12 @@ class SlidingDataset(Dataset):
         self.device = device
 
         # Load file
-        pq_path = f"{dataset_folder}/{unit}_generator_data_{dataset_type}_measurements.parquet"
-        df = pd.read_parquet(pq_path)
+
+        if parquet_file is None:
+            parquet_file = f"{dataset_folder}/{unit}_generator_data_{dataset_type}_measurements.parquet"
+        else:
+            parquet_file = f"{dataset_folder}/{parquet_file}"
+        df = pd.read_parquet(parquet_file)
 
         # Filter operating mode
         if equilibrium:
@@ -61,6 +66,7 @@ class SlidingDataset(Dataset):
         self.start_indices = torch.from_numpy(start_indices)
 
         # Convert to tensor and normalize
+        self.df = df
         self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
         self.measurements = self.measurements.T
         mean = self.measurements.mean(dim=1, keepdim=True)
