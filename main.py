@@ -29,9 +29,13 @@ def main() -> None:
     device = select_device()
     print(f"Using device: {device}")
 
-    window_size = 50
+    window_size = 64
     dataset = SlidingDataset(
-        unit="VG5", dataset_type="training", operating_mode="turbine", window_size=window_size, device=device
+        # parquet_file="Dataset/VG5_generator_data_training_measurements.parquet",
+        parquet_file="Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet",
+        operating_mode="turbine",
+        window_size=window_size,
+        device=device,
     )
 
     train_loader, val_loader = create_dataloaders(dataset, batch_size=256, validation_split=0.2)

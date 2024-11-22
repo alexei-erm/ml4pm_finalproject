@@ -8,13 +8,10 @@ from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, Sequentia
 class SlidingDataset(Dataset):
     def __init__(
         self,
-        unit: Literal["VG4", "VG5", "VG6"],
-        dataset_type: Literal["training", "testing_synthetic_01", "testing_synthetic_02", "testing_real"],
+        parquet_file: str,
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         equilibrium: bool = True,
-        dataset_folder: str = "Dataset",
-        parquet_file: str | None = None,
-        window_size: int = 50,
+        window_size: int = 64,
         device: torch.device = torch.device("cpu"),
     ) -> None:
         assert window_size >= 1
@@ -22,11 +19,6 @@ class SlidingDataset(Dataset):
         self.device = device
 
         # Load file
-
-        if parquet_file is None:
-            parquet_file = f"{dataset_folder}/{unit}_generator_data_{dataset_type}_measurements.parquet"
-        else:
-            parquet_file = f"{dataset_folder}/{parquet_file}"
         df = pd.read_parquet(parquet_file)
 
         # Filter operating mode
@@ -50,13 +42,21 @@ class SlidingDataset(Dataset):
         ]
         df.drop(columns=operating_mode_vars, inplace=True)
 
+        # If the dataset contains labels, separate them from the measurement data
+        if "ground_truth" in df.columns:
+            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy()).to(device)
+            df.drop(columns="ground_truth", inplace=True)
+
         # Aggregate injector openings
         injector_columns_mask = df.columns.to_series().str.match("injector_0[1-9]_opening")
         total_injector_opening = df.loc[:, injector_columns_mask].sum(axis=1)
         df.drop(columns=df.columns[injector_columns_mask], inplace=True)
         df["total_injector_opening"] = total_injector_opening
 
-        # Compute subsequence indices
+        # Save filtered measurements DataFrame
+        self.df = df
+
+        # Compute subsequence indices according to window size
         valid_end_indices = (
             df.index.to_series()
             .diff(periods=self.window_size - 1)
@@ -66,7 +66,6 @@ class SlidingDataset(Dataset):
         self.start_indices = torch.from_numpy(start_indices)
 
         # Convert to tensor and normalize
-        self.df = df
         self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
         self.measurements = self.measurements.T
         mean = self.measurements.mean(dim=1, keepdim=True)
