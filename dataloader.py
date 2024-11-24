@@ -2,7 +2,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, SequentialSampler
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 
 class SlidingDataset(Dataset):
@@ -14,6 +14,7 @@ class SlidingDataset(Dataset):
         window_size: int = 64,
         device: torch.device = torch.device("cpu"),
     ) -> None:
+
         assert window_size >= 1
         self.window_size = window_size
         self.device = device
@@ -28,19 +29,14 @@ class SlidingDataset(Dataset):
             df = df[df[f"{operating_mode}_mode"]]
 
         # Remove operating mode variables from data
-        operating_mode_vars = [
+        operating_mode_vars = [var for var in df.columns if "mode" in var] + [
             "machine_on",
             "machine_off",
-            "turbine_mode",
-            "equilibrium_turbine_mode",
-            "pump_mode",
-            "equilibrium_pump_mode",
-            "short_circuit_mode",
-            "equilibrium_short_circuit_mode",
             "dyn_only_on",
             "all",
         ]
         df.drop(columns=operating_mode_vars, inplace=True)
+        assert (df.dtypes == float).all()
 
         # If the dataset contains labels, separate them from the measurement data
         if "ground_truth" in df.columns:
@@ -75,13 +71,24 @@ class SlidingDataset(Dataset):
     def __len__(self) -> int:
         return len(self.start_indices)
 
-    def __getitem__(self, idx: int) -> torch.tensor:
-        start_index = self.start_indices[idx]
-        return self.measurements[:, start_index : start_index + self.window_size]
+    def __getitem__(self, index: int) -> torch.Tensor:
+        start_index = self.start_indices[index]
+        end_index = start_index + self.window_size
+        return self.measurements[:, start_index:end_index]
 
 
-def create_dataloaders(
-    dataset: Dataset, batch_size: int = 256, validation_split: float = 0.2
+class SlidingLabeledDataset(SlidingDataset):
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        start_index = self.start_indices[index]
+        end_index = start_index + self.window_size
+        return (
+            self.measurements[:, start_index:end_index],
+            self.ground_truth[start_index:end_index],
+        )
+
+
+def create_train_dataloaders(
+    dataset: Dataset, batch_size: int = 256, validation_split: float = 0.1
 ) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
@@ -93,7 +100,6 @@ def create_dataloaders(
     validation_indices = indices[-validation_size:]
 
     train_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices))
-    # FIXME
-    validation_loader = DataLoader(dataset, batch_size=batch_size, sampler=SequentialSampler(validation_indices))
+    validation_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(validation_indices))
 
     return train_loader, validation_loader

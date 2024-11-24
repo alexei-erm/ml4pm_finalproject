@@ -1,4 +1,4 @@
-from dataloader import DataLoader, SlidingDataset, create_dataloaders
+from dataloader import DataLoader, SlidingDataset, create_train_dataloaders
 from model import ConvolutionalAutoencoder
 from train import train_autoencoder
 from utils import seed_all, select_device
@@ -29,16 +29,16 @@ def main() -> None:
     device = select_device()
     print(f"Using device: {device}")
 
-    window_size = 64
+    window_size = 50
     dataset = SlidingDataset(
-        # parquet_file="Dataset/VG5_generator_data_training_measurements.parquet",
-        parquet_file="Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet",
+        parquet_file="Dataset/VG5_generator_data_training_measurements.parquet",
+        # parquet_file="Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet",
         operating_mode="turbine",
         window_size=window_size,
         device=device,
     )
 
-    train_loader, val_loader = create_dataloaders(dataset, batch_size=256, validation_split=0.2)
+    train_loader, val_loader = create_train_dataloaders(dataset, batch_size=256, validation_split=0.2)
 
     model = ConvolutionalAutoencoder(input_channels=dataset[0].size(0), input_length=window_size).to(device)
 
@@ -64,38 +64,29 @@ def main() -> None:
 
         fig, ax = plt.subplots()
 
-        def evaluate(dataset_type, parquet_file=None):
+        def evaluate(dataset_type, parquet_file):
             dataset = SlidingDataset(
-                unit="VG5",
-                dataset_type=dataset_type,
                 parquet_file=parquet_file,
                 operating_mode="turbine",
                 window_size=window_size,
                 device=device,
             )
 
-            if dataset.df.columns[-2] == "ground_truth":
-                labels = dataset.df["ground_truth"].to_numpy()
-                dataset.measurements[-2, :] = dataset.measurements[-1, :]
-                dataset.measurements = dataset.measurements[:-1, :]
-            else:
-                labels = None
-
-            _, val_loader = create_dataloaders(dataset, batch_size=256, validation_split=0.099)
-            spes = compute_spes(val_loader, model)
+            test_loader = DataLoader(dataset, batch_size=256)
+            spes = compute_spes(test_loader, model)
             print(f"{dataset_type}: Mean = {spes.mean()}, Std = {spes.std()}, min = {spes.min()}, max = {spes.max()}")
 
             spes = spes[spes < 5000.0]
-            ax.hist(spes, bins=200, alpha=0.5, label=dataset_type, log=True)
+            ax.hist(spes, density=True, bins=200, alpha=0.5, label=dataset_type, log=False)
 
-            fig2, ax2 = plt.subplots()
-            if labels is not None:
-                print(labels.shape)
-                print(spes.shape)
-                RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax2)
-
-        evaluate("training")
-        evaluate("synthetic_01_a", "synthetic_anomalies/VG5_anomaly_01_type_a.parquet")
+        evaluate("training", "Dataset/VG5_generator_data_training_measurements.parquet")
+        evaluate("synthetic_01_a", "Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet")
+        evaluate("synthetic_01_b", "Dataset/synthetic_anomalies/VG5_anomaly_01_type_b.parquet")
+        evaluate("synthetic_01_c", "Dataset/synthetic_anomalies/VG5_anomaly_01_type_c.parquet")
+        evaluate("synthetic_02_a", "Dataset/synthetic_anomalies/VG5_anomaly_02_type_a.parquet")
+        evaluate("synthetic_02_b", "Dataset/synthetic_anomalies/VG5_anomaly_02_type_b.parquet")
+        evaluate("synthetic_02_c", "Dataset/synthetic_anomalies/VG5_anomaly_02_type_c.parquet")
+        evaluate("testing", "Dataset/VG5_generator_data_testing_real_measurements.parquet")
         plt.legend()
         plt.show()
 
