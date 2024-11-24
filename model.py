@@ -7,7 +7,7 @@ class SimpleAE(nn.Module):
     def __init__(self, input_features: int) -> None:
         super(SimpleAE, self).__init__()
 
-        sizes = [input_features, 64, 32, 16]
+        sizes = [input_features, 64, 64, 32]
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(
@@ -17,7 +17,6 @@ class SimpleAE(nn.Module):
                 ]
             ),
             nn.Linear(sizes[-2], sizes[-1]),
-            nn.BatchNorm1d(sizes[-1]),
         )
 
         self.decoder = nn.Sequential(

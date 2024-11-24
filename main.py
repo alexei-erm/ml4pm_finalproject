@@ -1,4 +1,4 @@
-from dataloader import DataLoader, SlidingDataset, create_train_dataloaders
+from dataloader import DataLoader, SlidingDataset, SlidingLabeledDataset, create_train_dataloaders
 from model import SimpleAE, ConvAE
 from train import train_autoencoder
 from utils import seed_all, select_device
@@ -7,6 +7,7 @@ import config
 import argparse
 import torch
 import torch.nn as nn
+from sklearn.metrics import RocCurveDisplay
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,11 +18,33 @@ def compute_spes(loader: DataLoader, model: nn.Module) -> np.ndarray:
     model.eval()
     with torch.no_grad():
         for x in tqdm(loader):
-            reconstruction = model(x)
+            reconstruction, latent = model(x)
             spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
             spes.append(spe.cpu().numpy())
 
     return np.concatenate(spes)
+
+
+def compute_spes_and_labels(model: nn.Module, parquet_file: str, window_size: int, device: torch.device) -> np.ndarray:
+    dataset = SlidingLabeledDataset(
+        parquet_file=parquet_file,
+        operating_mode="turbine",
+        window_size=window_size,
+        device=device,
+    )
+
+    loader = DataLoader(dataset, batch_size=256)
+    spes = []
+    labels = []
+    model.eval()
+    with torch.no_grad():
+        for x, y in tqdm(loader):
+            reconstruction, latent = model(x)
+            spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
+            spes.append(spe.cpu().numpy())
+            labels.append(y.squeeze().cpu().numpy())
+
+    return np.concatenate(spes), np.concatenate(labels)
 
 
 def main(args) -> None:
@@ -44,8 +67,8 @@ def main(args) -> None:
     # model = ConvAE(input_channels=dataset[0].size(0), input_length=window_size).to(device)
     model = SimpleAE(input_features=dataset[0].size(0)).to(device)
 
-    if True:
-        train_autoencoder(model, train_loader, val_loader, n_epochs=300, learning_rate=1e-3, experiment="simple")
+    if False:
+        train_autoencoder(model, train_loader, val_loader, n_epochs=200, learning_rate=1e-3, experiment="simple")
     else:
         model.load_state_dict(torch.load("models/best_model.pt", weights_only=True))
         model.eval()
@@ -64,7 +87,7 @@ def main(args) -> None:
             axes[1].legend()
             plt.show()"""
 
-        fig, ax = plt.subplots()
+        """fig, ax = plt.subplots()
 
         def evaluate(dataset_type, parquet_file):
             dataset = SlidingDataset(
@@ -78,8 +101,7 @@ def main(args) -> None:
             spes = compute_spes(test_loader, model)
             print(f"{dataset_type}: Mean = {spes.mean()}, Std = {spes.std()}, min = {spes.min()}, max = {spes.max()}")
 
-            spes = spes[spes < 5000.0]
-            ax.hist(spes, density=True, bins=200, alpha=0.5, label=dataset_type, log=False)
+            ax.hist(spes[spes < 100.0], density=True, bins=200, alpha=0.5, label=dataset_type, log=False)
 
         evaluate("training", "Dataset/VG5_generator_data_training_measurements.parquet")
         evaluate("synthetic_01_a", "Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet")
@@ -89,7 +111,15 @@ def main(args) -> None:
         evaluate("synthetic_02_b", "Dataset/synthetic_anomalies/VG5_anomaly_02_type_b.parquet")
         evaluate("synthetic_02_c", "Dataset/synthetic_anomalies/VG5_anomaly_02_type_c.parquet")
         evaluate("testing", "Dataset/VG5_generator_data_testing_real_measurements.parquet")
-        plt.legend()
+        plt.legend()"""
+
+        fig, ax = plt.subplots()
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+            spes, labels = compute_spes_and_labels(
+                model, f"Dataset/synthetic_anomalies/VG5_anomaly_{name}.parquet", window_size, device
+            )
+            RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax, name=name)
+
         plt.show()
 
 
