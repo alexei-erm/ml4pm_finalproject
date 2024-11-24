@@ -3,9 +3,42 @@ import torch.nn as nn
 from itertools import chain
 
 
-class ConvolutionalAutoencoder(nn.Module):
+class SimpleAE(nn.Module):
+    def __init__(self, input_features: int) -> None:
+        super(SimpleAE, self).__init__()
+
+        sizes = [input_features, 64, 32, 16]
+
+        self.encoder = nn.Sequential(
+            *chain.from_iterable(
+                [
+                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ReLU(), nn.Dropout(0.1))
+                    for i in range(len(sizes) - 2)
+                ]
+            ),
+            nn.Linear(sizes[-2], sizes[-1]),
+            nn.BatchNorm1d(sizes[-1]),
+        )
+
+        self.decoder = nn.Sequential(
+            *chain.from_iterable(
+                [
+                    (nn.Linear(sizes[i], sizes[i - 1]), nn.BatchNorm1d(sizes[i - 1]), nn.ReLU())
+                    for i in range(len(sizes) - 1, 1, -1)
+                ]
+            ),
+            nn.Linear(sizes[1], sizes[0]),
+        )
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        latent = self.encoder(x.squeeze(-1))
+        output = self.decoder(latent).unsqueeze(-1)
+        return output, latent
+
+
+class ConvAE(nn.Module):
     def __init__(self, input_channels: int, input_length: int) -> None:
-        super(ConvolutionalAutoencoder, self).__init__()
+        super(ConvAE, self).__init__()
 
         kernel_size = 7
         channels = [32, 32, 64, 64]
@@ -45,9 +78,7 @@ class ConvolutionalAutoencoder(nn.Module):
             nn.ConvTranspose1d(channels[0], input_channels, kernel_size=kernel_size, padding=padding),
         )
 
-    def forward(self, x: torch.tensor) -> torch.tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         latent = self.encoder(x)
-        return self.decoder(latent)
-
-    def get_latent(self, x: torch.tensor) -> torch.tensor:
-        return self.encoder(x)
+        output = self.decoder(latent)
+        return output, latent

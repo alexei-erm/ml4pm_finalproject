@@ -1,5 +1,5 @@
 from dataloader import DataLoader, SlidingDataset, create_train_dataloaders
-from model import ConvolutionalAutoencoder
+from model import SimpleAE, ConvAE
 from train import train_autoencoder
 from utils import seed_all, select_device
 import config
@@ -28,9 +28,9 @@ def main(args) -> None:
     device = select_device()
     print(f"Using device: {device}")
 
-    seed_all(args.seed)
+    seed_all(42)
 
-    window_size = 50
+    window_size = 1
     dataset = SlidingDataset(
         parquet_file="Dataset/VG5_generator_data_training_measurements.parquet",
         # parquet_file="Dataset/synthetic_anomalies/VG5_anomaly_01_type_a.parquet",
@@ -39,12 +39,13 @@ def main(args) -> None:
         device=device,
     )
 
-    train_loader, val_loader = create_train_dataloaders(dataset, batch_size=256, validation_split=0.2)
+    train_loader, val_loader = create_train_dataloaders(dataset, batch_size=256, validation_split=0.1)
 
-    model = ConvolutionalAutoencoder(input_channels=dataset[0].size(0), input_length=window_size).to(device)
+    # model = ConvAE(input_channels=dataset[0].size(0), input_length=window_size).to(device)
+    model = SimpleAE(input_features=dataset[0].size(0)).to(device)
 
-    if False:
-        train_autoencoder(model, train_loader, val_loader, n_epochs=100)
+    if True:
+        train_autoencoder(model, train_loader, val_loader, n_epochs=300, learning_rate=1e-3, experiment="simple")
     else:
         model.load_state_dict(torch.load("models/best_model.pt", weights_only=True))
         model.eval()
@@ -94,8 +95,8 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], required=True)
-    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], required=True)
+    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"])
+    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"])
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--train", action="store_true")
     args = parser.parse_args()

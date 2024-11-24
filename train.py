@@ -11,11 +11,12 @@ def train_autoencoder(
     val_loader: DataLoader,
     n_epochs: int = 100,
     learning_rate: float = 1e-3,
+    experiment: str = "default",
 ):
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
-    writer = SummaryWriter(log_dir="runs/conv", flush_secs=10)
+    writer = SummaryWriter(log_dir=f"runs/{experiment}", flush_secs=10)
 
     train_losses = []
     val_losses = []
@@ -29,7 +30,7 @@ def train_autoencoder(
         for x in progress_bar:
             optimizer.zero_grad(set_to_none=True)
 
-            reconstruction = model(x)
+            reconstruction, latent = model(x)
             loss = criterion(reconstruction, x)
             loss.backward()
             optimizer.step()
@@ -45,7 +46,7 @@ def train_autoencoder(
         val_loss = 0
         with torch.no_grad():
             for x in val_loader:
-                reconstruction = model(x)
+                reconstruction, latent = model(x)
                 val_loss += criterion(reconstruction, x).item()
 
         val_loss = val_loss / len(val_loader)
@@ -57,4 +58,4 @@ def train_autoencoder(
             best_val_loss = val_loss
             torch.save(model.state_dict(), "models/best_model.pt")
 
-        print(f"Epoch [{epoch + 1}/{n_epochs}], Train Loss: {train_loss:.6f}, Validation Loss: {val_loss:.6f}")
+        print(f"Epoch {epoch + 1}/{n_epochs}, Train Loss: {train_loss:.6f}, Validation Loss: {val_loss:.6f}")
