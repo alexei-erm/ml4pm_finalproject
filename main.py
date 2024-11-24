@@ -2,10 +2,11 @@ from dataloader import DataLoader, SlidingDataset, create_train_dataloaders
 from model import ConvolutionalAutoencoder
 from train import train_autoencoder
 from utils import seed_all, select_device
+import config
 
+import argparse
 import torch
 import torch.nn as nn
-from sklearn.metrics import RocCurveDisplay
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,11 +24,11 @@ def compute_spes(loader: DataLoader, model: nn.Module) -> np.ndarray:
     return np.concatenate(spes)
 
 
-def main() -> None:
-    seed_all(42)
-
+def main(args) -> None:
     device = select_device()
     print(f"Using device: {device}")
+
+    seed_all(args.seed)
 
     window_size = 50
     dataset = SlidingDataset(
@@ -92,4 +93,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], required=True)
+    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], required=True)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--train", action="store_true")
+    args = parser.parse_args()
+    main(args)
