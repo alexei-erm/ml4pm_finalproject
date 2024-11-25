@@ -1,0 +1,12 @@
+seed: 42
+model: SimpleAE
+unit: VG4
+operating_mode: turbine
+equilibrium: true
+window_size: 1
+batch_size: 256
+epochs: 200
+learning_rate: 0.001
+validation_split: 0.1
+dataset_root: Dataset
+train: true

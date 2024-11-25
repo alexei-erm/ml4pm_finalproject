@@ -53,6 +53,27 @@ def select_device() -> torch.device:
 
 
 # Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/dict.py
+def print_dict(val, nesting: int = -4, start: bool = True) -> None:
+    """Prints a nested dictionary."""
+
+    if isinstance(val, dict):
+        if not start:
+            print("")
+        nesting += 4
+        for k in val:
+            print(nesting * " ", end="")
+            print(k, end=": ")
+            print_dict(val[k], nesting, start=False)
+    else:
+        # Deal with functions in print statements
+        if callable(val):
+            print(callable_to_string(val))
+        else:
+            print(val)
+
+
+# Adapted from
 # https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/string.py
 def callable_to_string(value: Callable) -> str:
     """Converts a callable object to a string.

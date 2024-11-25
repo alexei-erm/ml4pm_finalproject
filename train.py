@@ -1,16 +1,19 @@
 from config import Config
 from dataloader import SlidingDataset, SlidingLabeledDataset, create_dataloaders
+from model import *  # noqa F401
 
 import os
 from tqdm import tqdm
 import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import RocCurveDisplay
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 
-def train(model: nn.Module, cfg: Config, dataset_root: str, log_dir: str, device: torch.device) -> None:
+def train(cfg: Config, dataset_root: str, log_dir: str, device: torch.device) -> None:
     parquet_file = os.path.abspath(
         os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
     )
@@ -21,6 +24,9 @@ def train(model: nn.Module, cfg: Config, dataset_root: str, log_dir: str, device
         window_size=cfg.window_size,
         device=device,
     )
+
+    model_type = eval(cfg.model)
+    model = model_type(input_channels=dataset.measurements.size(0), cfg=cfg).to(device)
 
     train_loader, val_loader = create_dataloaders(
         dataset, batch_size=cfg.batch_size, validation_split=cfg.validation_split
@@ -68,6 +74,34 @@ def train(model: nn.Module, cfg: Config, dataset_root: str, log_dir: str, device
         print(f"Epoch {epoch + 1}/{cfg.epochs}, Train Loss: {train_loss:.6f}, Validation Loss: {val_loss:.6f}")
 
 
+def evaluate(cfg: Config, dataset_root: str, log_dir: str, device: torch.device) -> None:
+    parquet_file = os.path.abspath(
+        os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
+    )
+    dataset = SlidingDataset(
+        parquet_file=parquet_file,
+        operating_mode=cfg.operating_mode,
+        equilibrium=cfg.equilibrium,
+        window_size=cfg.window_size,
+        device=device,
+    )
+
+    model_type = eval(cfg.model)
+    model = model_type(input_channels=dataset.measurements.size(0), cfg=cfg).to(device)
+
+    model_path = os.path.join(log_dir, "model.pt")
+    model.load_state_dict(torch.load(model_path, weights_only=True))
+
+    fig, ax = plt.subplots()
+    for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+        spes, labels = compute_spes_and_labels(
+            model, f"Dataset/synthetic_anomalies/{cfg.unit}_anomaly_{name}.parquet", cfg.window_size, device
+        )
+        RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax, name=name)
+
+    plt.show()
+
+
 def compute_spes(loader: DataLoader, model: nn.Module) -> np.ndarray:
     spes = []
     model.eval()
@@ -84,6 +118,7 @@ def compute_spes_and_labels(model: nn.Module, parquet_file: str, window_size: in
     dataset = SlidingLabeledDataset(
         parquet_file=parquet_file,
         operating_mode="turbine",
+        equilibrium=True,
         window_size=window_size,
         device=device,
     )

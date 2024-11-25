@@ -1,18 +1,20 @@
+from config import Config
+
 import torch
 import torch.nn as nn
 from itertools import chain
 
 
 class SimpleAE(nn.Module):
-    def __init__(self, input_features: int) -> None:
+    def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SimpleAE, self).__init__()
 
-        sizes = [input_features, 64, 64, 32]
+        sizes = [input_channels, 64, 64, 32]
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(
                 [
-                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ELU(), nn.Dropout(0.1))
+                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ELU())  # , nn.Dropout(0.1))
                     for i in range(len(sizes) - 2)
                 ]
             ),
@@ -36,7 +38,7 @@ class SimpleAE(nn.Module):
 
 
 class ConvAE(nn.Module):
-    def __init__(self, input_channels: int, input_length: int) -> None:
+    def __init__(self, input_channels: int, cfg: Config) -> None:
         super(ConvAE, self).__init__()
 
         kernel_size = 7
@@ -64,13 +66,13 @@ class ConvAE(nn.Module):
             *conv_layer(input_channels, channels[0]),
             *chain.from_iterable(conv_layer(channels[i - 1], channels[i]) for i in range(1, len(channels))),
             nn.Flatten(),
-            nn.Linear(channels[-1] * input_length, latent_features),
+            nn.Linear(channels[-1] * cfg.window_size, latent_features),
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(latent_features, channels[2] * input_length),
+            nn.Linear(latent_features, channels[2] * cfg.window_size),
             nn.ReLU(),
-            nn.Unflatten(dim=-1, unflattened_size=(channels[2], input_length)),
+            nn.Unflatten(dim=-1, unflattened_size=(channels[2], cfg.window_size)),
             *chain.from_iterable(
                 conv_transpose_layer(channels[i], channels[i - 1]) for i in range(len(channels) - 1, 0, -1)
             ),

@@ -7,12 +7,12 @@ class Config:
     model: str = "ConvAE"
     unit: str = "VG5"
     operating_mode: str = "turbine"
-    equilibium: bool = True
+    equilibrium: bool = True
     window_size: int = 64
     batch_size: int = 256
-    epochs: int = 200
+    epochs: int = 300
     learning_rate: float = 1e-3
-    validation_split: float = 0.1
+    validation_split: float = 0.2
 
 
 @dataclass
