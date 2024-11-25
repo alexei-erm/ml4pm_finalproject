@@ -9,12 +9,12 @@ class SimpleAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SimpleAE, self).__init__()
 
-        sizes = [input_channels, 64, 64, 32]
+        sizes = [input_channels, 128, 64, 32]
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(
                 [
-                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ELU())  # , nn.Dropout(0.1))
+                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ELU(), nn.Dropout(0.1))
                     for i in range(len(sizes) - 2)
                 ]
             ),

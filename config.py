@@ -10,7 +10,7 @@ class Config:
     equilibrium: bool = True
     window_size: int = 64
     batch_size: int = 256
-    epochs: int = 300
+    epochs: int = 500
     learning_rate: float = 1e-3
     validation_split: float = 0.2
 
