@@ -1,16 +1,15 @@
-from dataclasses import dataclass, MISSING
+from dataclasses import dataclass
 
 
 @dataclass
-class BaseConfig:
-    name: str = MISSING
+class ConvAEConfig:
     seed: int = 42
-    window_size: int = 50
+    window_size: int = 64
     batch_size: int = 256
     epochs: int = 200
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-3
 
 
 @dataclass
-class SimpleAEConfig(BaseConfig):
-    name: str = "SimpleAE"
+class SimpleAEConfig(ConvAEConfig):
+    window_size: int = 1

@@ -2,8 +2,10 @@ from dataloader import DataLoader, SlidingDataset, SlidingLabeledDataset, create
 from model import SimpleAE, ConvAE
 from train import train_autoencoder
 from utils import seed_all, select_device
-import config
+import config  # noqa F401
 
+import os
+import yaml
 import argparse
 import torch
 import torch.nn as nn
@@ -47,7 +49,20 @@ def compute_spes_and_labels(model: nn.Module, parquet_file: str, window_size: in
     return np.concatenate(spes), np.concatenate(labels)
 
 
-def main(args) -> None:
+def main(args: argparse.Namespace) -> None:
+    cfg = eval(f"config.{args.model}Config")()
+    model_name = f"{args.model}_{args.unit}_{args.operating_condition}"
+    print(model_name)
+    exit()
+
+    log_root_path = os.path.join("logs", agent_cfg.experiment_name)
+    log_root_path = os.path.abspath(log_root_path)
+    print(f"[INFO]: Logging experiment in directory: {log_root_path}")
+    # specify directory for logging runs: {time-stamp}_{run_name}
+    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if agent_cfg.run_name:
+        log_dir += f"_{agent_cfg.run_name}"
+    log_dir = os.path.join(log_root_path, log_dir)
     device = select_device()
     print(f"Using device: {device}")
 
@@ -125,9 +140,12 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"])
-    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"])
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--train", action="store_true")
+    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE")
+    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], default="VG5")
+    parser.add_argument(
+        "--operating_condition", type=str, choices=["pump", "turbine", "short_circuit"], default="turbine"
+    )
+    parser.add_argument("--train", action="store_true")
     args = parser.parse_args()
+
     main(args)
