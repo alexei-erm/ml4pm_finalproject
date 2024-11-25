@@ -1,4 +1,4 @@
-from train import train, evaluate
+from runner import Runner
 from utils import seed_all, select_device, dump_yaml
 from model import *
 from config import *
@@ -21,6 +21,9 @@ def load_config(args: argparse.Namespace) -> Config:
         if value is not None:
             cfg.__dict__[arg] = value
 
+    if args.transient:
+        cfg.equilibrium = False
+
     return cfg
 
 
@@ -35,6 +38,10 @@ def main(args: argparse.Namespace) -> None:
     seed_all(cfg.seed)
 
     model_name = f"{cfg.model}_{cfg.unit}_{cfg.operating_mode}"
+    if cfg.transient:
+        model_name += "_transient"
+    else:
+        model_name += "_equilibrium"
     log_root_dir = os.path.abspath(os.path.join("logs", model_name))
 
     print("=" * os.get_terminal_size()[0])
@@ -44,14 +51,16 @@ def main(args: argparse.Namespace) -> None:
 
     if args.train:
         log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-        print(f"Log directory: {log_dir}")
+        print(f"Saving model and logs to: {log_dir}")
 
-        dump_yaml(os.path.join(log_dir, "config.yaml"), cfg)
-
-        train(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        runner.train()
     else:
         log_dir = get_latest(log_root_dir)
-        evaluate(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        print(f"Loading model from: {log_dir}")
+
+        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        runner.test()
 
 
 if __name__ == "__main__":
@@ -60,9 +69,11 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE")
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None)
     parser.add_argument("--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], default=None)
+    parser.add_argument("--transient", action="store_true")
     parser.add_argument("--dataset_root", type=str, default="Dataset")
-    parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--train", action="store_true")
+    parser.add_argument(
+        "--train", action="store_true", help="Train the model. By default, evaluates an existing model."
+    )
     args = parser.parse_args()
 
     main(args)
