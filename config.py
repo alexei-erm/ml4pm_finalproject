@@ -2,14 +2,20 @@ from dataclasses import dataclass
 
 
 @dataclass
-class ConvAEConfig:
+class Config:
     seed: int = 42
+    model: str = "ConvAE"
+    unit: str = "VG5"
+    operating_mode: str = "turbine"
+    equilibium: bool = True
     window_size: int = 64
     batch_size: int = 256
     epochs: int = 200
     learning_rate: float = 1e-3
+    validation_split: float = 0.1
 
 
 @dataclass
-class SimpleAEConfig(ConvAEConfig):
+class SimpleAEConfig(Config):
+    model: str = "SimpleAE"
     window_size: int = 1

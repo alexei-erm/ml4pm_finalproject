@@ -10,9 +10,9 @@ class SlidingDataset(Dataset):
         self,
         parquet_file: str,
         operating_mode: Literal["turbine", "pump", "short_circuit"],
-        equilibrium: bool = True,
-        window_size: int = 64,
-        device: torch.device = torch.device("cpu"),
+        equilibrium: bool,
+        window_size: int,
+        device: torch.device,
     ) -> None:
 
         assert window_size >= 1
@@ -87,9 +87,7 @@ class SlidingLabeledDataset(SlidingDataset):
         )
 
 
-def create_train_dataloaders(
-    dataset: Dataset, batch_size: int = 256, validation_split: float = 0.1
-) -> tuple[DataLoader, DataLoader]:
+def create_dataloaders(dataset: Dataset, batch_size: int, validation_split: float) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
     num_samples = len(dataset)

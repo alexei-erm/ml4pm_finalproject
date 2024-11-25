@@ -1,0 +1,10 @@
+seed: 42
+model: SimpleAE
+unit: VG5
+operating_mode: turbine
+equilibium: true
+window_size: 1
+batch_size: 256
+epochs: 200
+learning_rate: 0.001
+validation_split: 0.1

@@ -12,7 +12,7 @@ class SimpleAE(nn.Module):
         self.encoder = nn.Sequential(
             *chain.from_iterable(
                 [
-                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ReLU(), nn.Dropout(0.1))
+                    (nn.Linear(sizes[i], sizes[i + 1]), nn.BatchNorm1d(sizes[i + 1]), nn.ELU(), nn.Dropout(0.1))
                     for i in range(len(sizes) - 2)
                 ]
             ),
@@ -22,7 +22,7 @@ class SimpleAE(nn.Module):
         self.decoder = nn.Sequential(
             *chain.from_iterable(
                 [
-                    (nn.Linear(sizes[i], sizes[i - 1]), nn.BatchNorm1d(sizes[i - 1]), nn.ReLU())
+                    (nn.Linear(sizes[i], sizes[i - 1]), nn.BatchNorm1d(sizes[i - 1]), nn.ELU())
                     for i in range(len(sizes) - 1, 1, -1)
                 ]
             ),
