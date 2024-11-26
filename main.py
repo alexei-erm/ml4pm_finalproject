@@ -55,13 +55,18 @@ def main(args: argparse.Namespace) -> None:
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
         runner.train_autoencoder()
-    else:
+
+    elif args.eval:
         log_dir = get_latest(log_root_dir)
         print(f"Loading model from: {log_dir}")
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner._get_training_latent_mean()
-        runner.test_roc()
+        runner.test_autoencoder_roc()
+
+    else:
+        log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        runner.fit_spc()
 
 
 if __name__ == "__main__":
@@ -72,9 +77,9 @@ if __name__ == "__main__":
     parser.add_argument("--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], default=None)
     parser.add_argument("--transient", action="store_true")
     parser.add_argument("--dataset_root", type=str, default="Dataset")
-    parser.add_argument(
-        "--train", action="store_true", help="Train the model. By default, evaluates an existing model."
-    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--train", action="store_true")
+    group.add_argument("--eval", action="store_true")
     args = parser.parse_args()
 
     main(args)

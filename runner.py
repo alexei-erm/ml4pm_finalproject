@@ -24,7 +24,7 @@ class Runner:
         parquet_file = os.path.abspath(
             os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
         )
-        self.dataset = SlidingDataset(
+        self.training_dataset = SlidingDataset(
             parquet_file=parquet_file,
             operating_mode=cfg.operating_mode,
             equilibrium=cfg.equilibrium,
@@ -33,13 +33,13 @@ class Runner:
         )
 
         model_type = eval(cfg.model)
-        self.model = model_type(input_channels=self.dataset.measurements.size(0), cfg=cfg).to(device)
+        self.model = model_type(input_channels=self.training_dataset.measurements.shape[1], cfg=cfg).to(device)
 
     def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
 
         train_loader, val_loader = create_dataloaders(
-            self.dataset, batch_size=self.cfg.batch_size, validation_split=self.cfg.validation_split
+            self.training_dataset, batch_size=self.cfg.batch_size, validation_split=self.cfg.validation_split
         )
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate)
@@ -85,24 +85,7 @@ class Runner:
                 f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:.6f}, Validation Loss = {val_loss:.6f}"
             )
 
-    def _get_training_latent_mean(self) -> torch.Tensor:
-        self.model.eval()
-
-        loader = DataLoader(self.dataset, batch_size=self.cfg.batch_size)
-        output, latent = self.model(self.dataset[0].unsqueeze(0))
-        total_latent = torch.zeros_like(latent.squeeze())
-        num_samples = 0
-
-        with torch.no_grad():
-            for x in tqdm(loader):
-                reconstruction, latent = self.model(x)
-                total_latent += torch.sum(latent, dim=0)
-                num_samples += latent.shape[0]
-
-        mean = total_latent / num_samples
-        return mean
-
-    def test_roc(self) -> None:
+    def test_autoencoder_roc(self) -> None:
         if self.cfg.unit == "VG4":
             print("ROC evaluation is not possible with VG4")
             return
@@ -112,7 +95,11 @@ class Runner:
 
         self.model.eval()
 
+        latent_mean, latent_covariance = self.get_training_latent_statistics()
+        inv_latent_covariance = torch.linalg.inv(latent_covariance)
+
         fig, ax = plt.subplots()
+        fig2, ax2 = plt.subplots()
 
         for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
             dataset = SlidingLabeledDataset(
@@ -125,21 +112,113 @@ class Runner:
                 device=self.device,
             )
             loader = DataLoader(dataset, batch_size=self.cfg.batch_size)
+
             spes = []
             t2s = []
             labels = []
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    reconstruction, latent = self.model(x)
-                    spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
-                    spes.append(spe.cpu().numpy())
-                    labels.append(y.squeeze().cpu().numpy())
+                    labels.append(y.squeeze())
 
-            spes = np.concatenate(spes)
-            labels = np.concatenate(labels)
+                    reconstruction, latent = self.model(x)
+
+                    spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
+                    spes.append(spe)
+
+                    latent_diff = latent - latent_mean
+                    t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
+                    t2s.append(t2)
+
+            labels = torch.concatenate(labels).cpu().numpy()
+            spes = torch.concatenate(spes).cpu().numpy()
+            t2s = torch.concatenate(t2s).cpu().numpy()
 
             RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax, name=name)
+            RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2s, ax=ax2, name=name)
+
+        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
+        ax2.plot([0, 1], [0, 1], color="k", linestyle="--")
+        plt.legend()
+        plt.show()
+
+    def fit_spc(self) -> None:
+        x_healthy = self.training_dataset.measurements
+
+        mean = x_healthy.mean(dim=0, keepdim=True)
+        centered = x_healthy - mean
+        num_samples = x_healthy.shape[0]
+        covariance = (centered.T @ centered) / (num_samples - 1)
+
+        inv_covariance = torch.linalg.inv(covariance)
+
+        fig, ax = plt.subplots()
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+            dataset = SlidingLabeledDataset(
+                parquet_file=os.path.join(
+                    self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
+                ),
+                operating_mode=self.cfg.operating_mode,
+                equilibrium=self.cfg.equilibrium,
+                window_size=self.cfg.window_size,
+                device=self.device,
+            )
+
+            x_test = dataset.measurements
+            diff = x_test - mean
+            t2 = torch.einsum("bi,ij,bj->b", diff, inv_covariance, diff)
+
+            labels = dataset.ground_truth.cpu().numpy()
+
+            window = 20
+            tpr = []
+            fpr = []
+            for threshold in np.linspace(t2.min().item(), t2.max().item(), 1000):
+                fault = t2 > threshold
+                windowed = fault.unfold(0, window, 1)
+                consecutive_above_threshold = windowed.sum(dim=-1) == window
+                pred = torch.zeros_like(fault)
+                pred[window - 1 :] = consecutive_above_threshold
+                pred = pred.cpu().numpy()
+
+                tp = np.sum((pred == 1) & (labels == 1))
+                fp = np.sum((pred == 1) & (labels == 0))
+                tn = np.sum((pred == 0) & (labels == 0))
+                fn = np.sum((pred == 0) & (labels == 1))
+                tpr.append(tp / (tp + fn) if (tp + fn) > 0 else 0)
+                fpr.append(fp / (fp + tn) if (fp + tn) > 0 else 0)
+
+            tpr = np.array(tpr)
+            fpr = np.array(fpr)
+            RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax)
+            # t2 = t2.cpu().numpy()
+            # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
 
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         plt.legend()
         plt.show()
+
+    def get_training_latent_features(self) -> torch.Tensor:
+        self.model.eval()
+
+        loader = DataLoader(self.training_dataset, batch_size=self.cfg.batch_size)
+
+        all_latent = []
+
+        with torch.no_grad():
+            for x in tqdm(loader):
+                reconstruction, latent = self.model(x)
+                all_latent.append(latent)
+
+        return torch.concatenate(all_latent)
+
+    def get_training_latent_statistics(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns mean and covariance of the latent features commputed on the training set."""
+
+        latent = self.get_training_latent_features()
+
+        mean = latent.mean(dim=0, keepdim=True)
+        centered = latent - mean
+        num_samples = latent.shape[0]
+        covariance = (centered.T @ centered) / num_samples
+
+        return mean, covariance
