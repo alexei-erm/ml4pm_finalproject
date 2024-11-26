@@ -35,7 +35,7 @@ class Runner:
         model_type = eval(cfg.model)
         self.model = model_type(input_channels=self.dataset.measurements.size(0), cfg=cfg).to(device)
 
-    def train(self) -> None:
+    def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
 
         train_loader, val_loader = create_dataloaders(
@@ -85,7 +85,24 @@ class Runner:
                 f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:.6f}, Validation Loss = {val_loss:.6f}"
             )
 
-    def test(self) -> None:
+    def _get_training_latent_mean(self) -> torch.Tensor:
+        self.model.eval()
+
+        loader = DataLoader(self.dataset, batch_size=self.cfg.batch_size)
+        output, latent = self.model(self.dataset[0].unsqueeze(0))
+        total_latent = torch.zeros_like(latent.squeeze())
+        num_samples = 0
+
+        with torch.no_grad():
+            for x in tqdm(loader):
+                reconstruction, latent = self.model(x)
+                total_latent += torch.sum(latent, dim=0)
+                num_samples += latent.shape[0]
+
+        mean = total_latent / num_samples
+        return mean
+
+    def test_roc(self) -> None:
         if self.cfg.unit == "VG4":
             print("ROC evaluation is not possible with VG4")
             return
@@ -109,6 +126,7 @@ class Runner:
             )
             loader = DataLoader(dataset, batch_size=self.cfg.batch_size)
             spes = []
+            t2s = []
             labels = []
             with torch.no_grad():
                 for x, y in tqdm(loader):

@@ -54,13 +54,14 @@ def main(args: argparse.Namespace) -> None:
         print(f"Saving model and logs to: {log_dir}")
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.train()
+        runner.train_autoencoder()
     else:
         log_dir = get_latest(log_root_dir)
         print(f"Loading model from: {log_dir}")
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.test()
+        runner._get_training_latent_mean()
+        runner.test_roc()
 
 
 if __name__ == "__main__":
