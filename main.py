@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 def main() -> None:
     seed_all(42)
 
-    device = select_device()
+    # device = select_device()
+    device = 'cpu'
     print(f"Using device: {device}")
 
     window_size = 50
