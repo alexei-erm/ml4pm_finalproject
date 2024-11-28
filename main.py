@@ -61,7 +61,7 @@ def main(args: argparse.Namespace) -> None:
         print(f"Loading model from: {log_dir}")
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.test_autoencoder_roc()
+        runner.test_autoencoder()
 
     else:
         log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))

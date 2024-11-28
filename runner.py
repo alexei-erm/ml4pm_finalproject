@@ -86,9 +86,9 @@ class Runner:
                 f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:.6f}, Validation Loss = {val_loss:.6f}"
             )
 
-    def test_autoencoder_roc(self) -> None:
+    def test_autoencoder(self) -> None:
         if self.cfg.unit == "VG4":
-            print("ROC evaluation is not possible with VG4")
+            print("Evaluation is not possible with VG4")
             return
 
         model_path = os.path.join(self.log_dir, "model.pt")
@@ -97,11 +97,14 @@ class Runner:
         self.model.eval()
 
         latent_mean, latent_covariance = self.get_training_latent_statistics()
-        inv_latent_covariance = torch.linalg.inv(latent_covariance)
+        inv_latent_covariance = torch.linalg.inv(latent_covariance)  # + 1e-7 * torch.eye(latent_covariance.shape))
 
-        fig, ax = plt.subplots(1, 2)
+        fig, axes = plt.subplots(2, 3)
+        axes = axes.flatten()
 
-        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+        for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+            ax = axes[i]
+
             dataset = SlidingLabeledDataset(
                 parquet_file=os.path.join(
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
@@ -125,7 +128,7 @@ class Runner:
                     spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
                     spes.append(spe)
 
-                    latent_diff = latent - latent_mean
+                    latent_diff = latent - latent_mean.unsqueeze(0)
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
@@ -133,7 +136,18 @@ class Runner:
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
 
-            tpr = []
+            spes = spes.clip(max=2.0 * spes.std())
+            t2s = t2s.clip(max=2.0 * t2s.std())
+            spes = (spes - spes.min()) / (spes.max() - spes.min())
+            t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
+
+            ax.plot(labels, label="label")
+            ax.plot(spes, label="SPE")
+            ax.plot(t2s, label="T2")
+            ax.set_title(name)
+            fig.legend()
+
+            """tpr = []
             fpr = []
             for threshold in np.linspace(spes.min(), spes.max(), 1000):
                 pred = spes > threshold
@@ -147,26 +161,25 @@ class Runner:
 
             tpr = np.array(tpr)
             fpr = np.array(fpr)
-            RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax[0])
+            RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax[0])"""
 
-            # RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax[0], name=name)
-            # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2s, ax=ax[1], name=name)
+            # RocCurveDisplay.from_predictions(y_true=labels.any(axis=-1), y_pred=spes, ax=ax[0], name=name)
+            # RocCurveDisplay.from_predictions(y_true=labels.any(axis=-1), y_pred=t2s, ax=ax[1], name=name)
 
-        ax[0].plot([0, 1], [0, 1], color="k", linestyle="--")
-        ax[1].plot([0, 1], [0, 1], color="k", linestyle="--")
-        ax[0].title("SPE")
-        ax[1].title("T2")
-        ax[0].legend()
-        ax[1].legend()
+        # ax[0].plot([0, 1], [0, 1], color="k", linestyle="--")
+        # ax[1].plot([0, 1], [0, 1], color="k", linestyle="--")
+        # ax[0].set_title("SPE")
+        # ax[1].set_title("T2")
+        fig.tight_layout()
         plt.show()
 
     def fit_spc(self) -> None:
         x_healthy = self.training_dataset.measurements
 
-        mean = x_healthy.mean(dim=0, keepdim=True)
+        mean = x_healthy.mean(dim=1, keepdim=True)
         centered = x_healthy - mean
-        num_samples = x_healthy.shape[0]
-        covariance = (centered.T @ centered) / (num_samples - 1)
+        num_samples = x_healthy.shape[1]
+        covariance = (centered @ centered.T) / (num_samples - 1)
 
         inv_covariance = torch.linalg.inv(covariance)
 
@@ -184,11 +197,11 @@ class Runner:
 
             x_test = dataset.measurements
             diff = x_test - mean
-            t2 = torch.einsum("bi,ij,bj->b", diff, inv_covariance, diff)
+            t2 = torch.einsum("ib,ij,jb->b", diff, inv_covariance, diff)
 
             labels = dataset.ground_truth.cpu().numpy()
 
-            window = 20
+            window = 1
             tpr = []
             fpr = []
             for threshold in np.linspace(t2.min().item(), t2.max().item(), 1000):
@@ -212,6 +225,12 @@ class Runner:
             # t2 = t2.cpu().numpy()
             # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
 
+            fig, ax2 = plt.subplots()
+            ax2.plot(labels)
+            t2 = t2.clip(max=t2.mean() + 4 * t2.std())
+            ax2.plot((t2 - t2.min()) / (t2.max() - t2.min()))
+            ax2.set_title(name)
+
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         plt.legend()
         plt.show()
@@ -228,16 +247,16 @@ class Runner:
                 reconstruction, latent = self.model(x)
                 all_latent.append(latent)
 
-        return torch.concatenate(all_latent)
+        return torch.concatenate(all_latent).T
 
     def get_training_latent_statistics(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns mean and covariance of the latent features commputed on the training set."""
 
         latent = self.get_training_latent_features()
 
-        mean = latent.mean(dim=0, keepdim=True)
+        mean = latent.mean(dim=1, keepdim=True)
         centered = latent - mean
-        num_samples = latent.shape[0]
-        covariance = (centered.T @ centered) / (num_samples - 1)
+        num_samples = latent.shape[1]
+        covariance = (centered @ centered.T) / (num_samples - 1)
 
-        return mean, covariance
+        return mean.squeeze(), covariance
