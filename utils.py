@@ -2,6 +2,7 @@ import inspect
 import re
 import os
 import yaml
+import pickle
 import random
 from typing import Callable, Any
 import numpy as np
@@ -155,20 +156,71 @@ def class_to_dict(obj: object) -> dict[str, Any]:
     return data
 
 
-def dump_yaml(filename: str, data: dict | object) -> None:
-    """Writes a dict or object to a YAML file."""
+# Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/yaml.py
+def dump_yaml(filename: str, data: dict | object, sort_keys: bool = False):
+    """Saves data into a YAML file safely.
 
+    Note:
+        The function creates any missing directory along the file's path.
+
+    Args:
+        filename: The path to save the file at.
+        data: The data to save either a dictionary or class object.
+        sort_keys: Whether to sort the keys in the output file. Defaults to False.
+    """
     if not filename.endswith("yaml"):
         filename += ".yaml"
 
-    # Create directory if necessary
     if not os.path.exists(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-    # Convert data into dictionary
     if not isinstance(data, dict):
         data = class_to_dict(data)
 
-    # Save data
     with open(filename, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(data, f, default_flow_style=False, sort_keys=sort_keys)
+
+
+# Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/pkl.py
+def dump_pickle(filename: str, data: Any):
+    """Saves data into a pickle file safely.
+
+    Note:
+        The function creates any missing directory along the file's path.
+
+    Args:
+        filename: The path to save the file at.
+        data: The data to save.
+    """
+    # check ending
+    if not filename.endswith("pkl"):
+        filename += ".pkl"
+    # create directory
+    if not os.path.exists(os.path.dirname(filename)):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+    # save data
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
+
+
+# Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/pkl.py
+def load_pickle(filename: str) -> Any:
+    """Loads an input PKL file safely.
+
+    Args:
+        filename: The path to pickled file.
+
+    Raises:
+        FileNotFoundError: When the specified file does not exist.
+
+    Returns:
+        The data read from the input file.
+    """
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"File not found: {filename}")
+    with open(filename, "rb") as f:
+        data = pickle.load(f)
+    return data

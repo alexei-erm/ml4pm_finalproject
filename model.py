@@ -9,7 +9,7 @@ class SimpleAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SimpleAE, self).__init__()
 
-        sizes = [input_channels, 128, 64, 32]
+        sizes = [input_channels, 64, 32, 16]
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(

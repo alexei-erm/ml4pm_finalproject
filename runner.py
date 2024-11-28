@@ -1,7 +1,7 @@
 from config import Config
 from dataloader import SlidingDataset, SlidingLabeledDataset, create_dataloaders
 from model import *  # noqa F401
-from utils import dump_yaml, class_to_dict
+from utils import dump_yaml, dump_pickle
 
 import os
 from tqdm import tqdm
@@ -33,10 +33,11 @@ class Runner:
         )
 
         model_type = eval(cfg.model)
-        self.model = model_type(input_channels=self.training_dataset.measurements.shape[1], cfg=cfg).to(device)
+        self.model = model_type(input_channels=self.training_dataset.measurements.shape[0], cfg=cfg).to(device)
 
     def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
+        dump_pickle(os.path.join(self.log_dir, "model.pkl"), self.model)
 
         train_loader, val_loader = create_dataloaders(
             self.training_dataset, batch_size=self.cfg.batch_size, validation_split=self.cfg.validation_split
@@ -98,8 +99,7 @@ class Runner:
         latent_mean, latent_covariance = self.get_training_latent_statistics()
         inv_latent_covariance = torch.linalg.inv(latent_covariance)
 
-        fig, ax = plt.subplots()
-        fig2, ax2 = plt.subplots()
+        fig, ax = plt.subplots(1, 2)
 
         for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
             dataset = SlidingLabeledDataset(
@@ -133,12 +133,31 @@ class Runner:
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
 
-            RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax, name=name)
-            RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2s, ax=ax2, name=name)
+            tpr = []
+            fpr = []
+            for threshold in np.linspace(spes.min(), spes.max(), 1000):
+                pred = spes > threshold
 
-        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
-        ax2.plot([0, 1], [0, 1], color="k", linestyle="--")
-        plt.legend()
+                tp = np.sum((pred == 1) & (labels == 1).any(axis=-1))
+                fp = np.sum((pred == 1) & (labels == 0).any(axis=-1))
+                tn = np.sum((pred == 0) & (labels == 0).any(axis=-1))
+                fn = np.sum((pred == 0) & (labels == 1).any(axis=-1))
+                tpr.append(tp / (tp + fn) if (tp + fn) > 0 else 0)
+                fpr.append(fp / (fp + tn) if (fp + tn) > 0 else 0)
+
+            tpr = np.array(tpr)
+            fpr = np.array(fpr)
+            RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax[0])
+
+            # RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax[0], name=name)
+            # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2s, ax=ax[1], name=name)
+
+        ax[0].plot([0, 1], [0, 1], color="k", linestyle="--")
+        ax[1].plot([0, 1], [0, 1], color="k", linestyle="--")
+        ax[0].title("SPE")
+        ax[1].title("T2")
+        ax[0].legend()
+        ax[1].legend()
         plt.show()
 
     def fit_spc(self) -> None:
@@ -219,6 +238,6 @@ class Runner:
         mean = latent.mean(dim=0, keepdim=True)
         centered = latent - mean
         num_samples = latent.shape[0]
-        covariance = (centered.T @ centered) / num_samples
+        covariance = (centered.T @ centered) / (num_samples - 1)
 
         return mean, covariance

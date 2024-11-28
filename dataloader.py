@@ -66,6 +66,7 @@ class SlidingDataset(Dataset):
         mean = self.measurements.mean(dim=0, keepdim=True)
         std = self.measurements.std(dim=0, keepdim=True)
         self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
+        self.measurements = self.measurements.T
 
     def __len__(self) -> int:
         return len(self.start_indices)
@@ -73,7 +74,7 @@ class SlidingDataset(Dataset):
     def __getitem__(self, index: int) -> torch.Tensor:
         start_index = self.start_indices[index]
         end_index = start_index + self.window_size
-        return self.measurements[start_index:end_index, :]
+        return self.measurements[:, start_index:end_index]
 
 
 class SlidingLabeledDataset(SlidingDataset):
@@ -81,7 +82,7 @@ class SlidingLabeledDataset(SlidingDataset):
         start_index = self.start_indices[index]
         end_index = start_index + self.window_size
         return (
-            self.measurements[start_index:end_index, :],
+            self.measurements[:, start_index:end_index],
             self.ground_truth[start_index:end_index],
         )
 
