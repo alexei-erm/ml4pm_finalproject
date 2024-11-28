@@ -83,3 +83,41 @@ class ConvAE(nn.Module):
         latent = self.encoder(x)
         output = self.decoder(latent)
         return output, latent
+
+
+
+
+class LSTM_VAE(nn.Module):
+    def __init__(self, input_dim, latent_dim, seq_len, hidden_dim, num_layers):
+        super(LSTM_VAE, self).__init__()
+        self.seq_len = seq_len
+        self.latent_dim = latent_dim
+
+        # LSTM Encoder
+        self.encoder_lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
+        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+
+        # LSTM Decoder
+        self.decoder_lstm = nn.LSTM(latent_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc_out = nn.Linear(hidden_dim, input_dim)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def forward(self, x):
+        # Encode
+        _, (hidden, _) = self.encoder_lstm(x)
+        hidden = hidden[-1]  # Use the last layer's hidden state
+        mu = self.fc_mu(hidden)
+        logvar = self.fc_logvar(hidden)
+        z = self.reparameterize(mu, logvar)
+
+        # Decode
+        z_expanded = z.unsqueeze(1).repeat(1, self.seq_len, 1)  # Match sequence length
+        dec_out, _ = self.decoder_lstm(z_expanded)
+        recon_x = self.fc_out(dec_out)
+
+        return recon_x, mu, logvar

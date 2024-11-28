@@ -72,7 +72,7 @@ def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE")
+    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE", "LSTM_VAE"], default="SimpleAE")
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None)
     parser.add_argument("--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], default=None)
     parser.add_argument("--transient", action="store_true")

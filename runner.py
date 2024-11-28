@@ -3,6 +3,8 @@ from dataloader import SlidingDataset, SlidingLabeledDataset, create_dataloaders
 from model import *  # noqa F401
 from utils import dump_yaml, class_to_dict
 
+from model import LSTM_VAE
+
 import os
 from tqdm import tqdm
 import numpy as np
@@ -32,8 +34,29 @@ class Runner:
             device=device,
         )
 
-        model_type = eval(cfg.model)
-        self.model = model_type(input_channels=self.training_dataset.measurements.shape[1], cfg=cfg).to(device)
+        # Select the model based on the config
+        if cfg.model == "LSTM_VAE":
+            self.model = LSTM_VAE(
+                input_dim=self.training_dataset.measurements.shape[1],
+                latent_dim=cfg.latent_dim,
+                seq_len=cfg.window_size,
+                hidden_dim=cfg.hidden_dim,
+                num_layers=cfg.num_layers,
+            ).to(device)
+        else:
+            model_type = eval(cfg.model)
+            self.model = model_type(input_channels=self.training_dataset.measurements.shape[1], cfg=cfg).to(device)
+
+    def lstm_vae_loss(self, recon_x, x, mu, logvar):
+
+        # Reconstruction loss (MSE)
+        recon_loss = nn.functional.mse_loss(recon_x, x, reduction='sum')  # Sum over all pixels in the batch
+
+        # KL Divergence loss
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        kl_loss /= x.size(0)  # Normalize by batch size
+
+        return recon_loss + kl_loss
 
     def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
@@ -56,8 +79,14 @@ class Runner:
             for x in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{self.cfg.epochs}"):
                 optimizer.zero_grad(set_to_none=True)
 
-                reconstruction, latent = self.model(x)
-                loss = criterion(reconstruction, x)
+
+                if self.cfg.model == "LSTM_VAE":
+                    reconstruction, mu, logvar = self.model(x)
+                    loss = self.lstm_vae_loss(reconstruction, x, mu, logvar)
+                else:
+                    reconstruction, latent = self.model(x)
+                    loss = criterion(reconstruction, x)
+
                 loss.backward()
                 optimizer.step()
 
@@ -69,8 +98,13 @@ class Runner:
             val_loss = 0.0
             with torch.no_grad():
                 for x in val_loader:
-                    reconstruction, latent = self.model(x)
-                    loss = criterion(reconstruction, x)
+                    if self.cfg.model == "LSTM_VAE":
+                        reconstruction, mu, logvar = self.model(x)
+                        loss = self.lstm_vae_loss(reconstruction, x, mu, logvar)
+                    else:
+                        reconstruction, latent = self.model(x)
+                        loss = criterion(reconstruction, x)
+
                     val_loss += loss.item()
 
             val_loss /= len(val_loader)
@@ -95,13 +129,18 @@ class Runner:
 
         self.model.eval()
 
-        latent_mean, latent_covariance = self.get_training_latent_statistics()
+        if self.cfg.model == "LSTM_VAE":
+            latent_mean, latent_covariance = self.get_training_latent_statistics(lstm=True)
+        else:
+            latent_mean, latent_covariance = self.get_training_latent_statistics()
+        
         inv_latent_covariance = torch.linalg.inv(latent_covariance)
 
-        fig, ax = plt.subplots()
-        fig2, ax2 = plt.subplots()
+        fig, axes = plt.subplots(2, 3)
+        axes = axes.flatten()
 
-        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+        for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+            ax = axes[i]
             dataset = SlidingLabeledDataset(
                 parquet_file=os.path.join(
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
@@ -120,25 +159,36 @@ class Runner:
                 for x, y in tqdm(loader):
                     labels.append(y.squeeze())
 
-                    reconstruction, latent = self.model(x)
+                    if self.cfg.model == "LSTM_VAE":
+                        reconstruction, mu, logvar = self.model(x)
+                        latent = mu  # Use the latent mean (mu) for T² calculation
+                    else:
+                        reconstruction, latent = self.model(x)
 
                     spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
                     spes.append(spe)
 
                     latent_diff = latent - latent_mean
+                    print(latent_diff.shape,inv_latent_covariance.shape,latent.shape, latent_mean.shape)
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
+                    print(t2.shape)
 
-            labels = torch.concatenate(labels).cpu().numpy()
+            labels = torch.concatenate(labels).cpu().numpy().any(axis=1)
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
+            
+            print(spes.min(),spes.max(),t2s.min(),t2s.max(), spes.shape,t2s.shape)
+            #spes = spes.clip(max=2.0 * spes.std())
+            #t2s = t2s.clip(max=2.0 * t2s.std())
+            spes = (spes - spes.min()) / (spes.max() - spes.min())
+            t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
-            RocCurveDisplay.from_predictions(y_true=labels, y_pred=spes, ax=ax, name=name)
-            RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2s, ax=ax2, name=name)
-
-        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
-        ax2.plot([0, 1], [0, 1], color="k", linestyle="--")
-        plt.legend()
+            ax.plot(labels, label="label")
+            ax.plot(spes, label="SPE")
+            ax.plot(t2s, label="T2")
+            ax.set_title(name)
+ 
         plt.show()
 
     def fit_spc(self) -> None:
@@ -197,7 +247,7 @@ class Runner:
         plt.legend()
         plt.show()
 
-    def get_training_latent_features(self) -> torch.Tensor:
+    def get_training_latent_features(self, lstm: bool = False) -> torch.Tensor:
         self.model.eval()
 
         loader = DataLoader(self.training_dataset, batch_size=self.cfg.batch_size)
@@ -206,15 +256,19 @@ class Runner:
 
         with torch.no_grad():
             for x in tqdm(loader):
-                reconstruction, latent = self.model(x)
-                all_latent.append(latent)
+                if lstm:  # Handle LSTM-VAE
+                    _, mu, _ = self.model(x)  # Use mu for LSTM-VAE
+                    all_latent.append(mu)
+                else:
+                    reconstruction, latent = self.model(x)
+                    all_latent.append(latent)
 
         return torch.concatenate(all_latent)
 
-    def get_training_latent_statistics(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_training_latent_statistics(self, lstm: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns mean and covariance of the latent features commputed on the training set."""
 
-        latent = self.get_training_latent_features()
+        latent = self.get_training_latent_features(lstm=lstm)
 
         mean = latent.mean(dim=0, keepdim=True)
         centered = latent - mean
