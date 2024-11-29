@@ -13,6 +13,7 @@ class SlidingDataset(Dataset):
         equilibrium: bool,
         window_size: int,
         device: torch.device,
+        features: list[str] | None = None,
     ) -> None:
 
         assert window_size >= 1
@@ -61,12 +62,19 @@ class SlidingDataset(Dataset):
         start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
         self.start_indices = torch.from_numpy(start_indices)
 
-        # Convert to tensor and normalize
-        self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
+        # Convert to tensor
+        if features is not None:
+            self.measurements = torch.from_numpy(df[features].to_numpy(dtype=np.float32)).to(device)
+        else:
+            self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
+
+        # Normalize
         mean = self.measurements.mean(dim=0, keepdim=True)
         std = self.measurements.std(dim=0, keepdim=True)
         self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
         self.measurements = self.measurements.T
+        print(self.measurements.shape)
+        exit()
 
     def __len__(self) -> int:
         return len(self.start_indices)

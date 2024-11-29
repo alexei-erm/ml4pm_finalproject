@@ -30,6 +30,7 @@ class Runner:
             equilibrium=cfg.equilibrium,
             window_size=cfg.window_size,
             device=device,
+            features=None,  # FIXME
         )
 
         model_type = eval(cfg.model)
