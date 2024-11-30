@@ -30,7 +30,7 @@ class Runner:
             equilibrium=cfg.equilibrium,
             window_size=cfg.window_size,
             device=device,
-            features=None,  # FIXME
+            features=cfg.features,
         )
 
         model_type = eval(cfg.model)
@@ -113,6 +113,7 @@ class Runner:
                 operating_mode=self.cfg.operating_mode,
                 equilibrium=self.cfg.equilibrium,
                 window_size=self.cfg.window_size,
+                features=self.cfg.features,
                 device=self.device,
             )
             loader = DataLoader(dataset, batch_size=self.cfg.batch_size)
@@ -193,6 +194,7 @@ class Runner:
                 operating_mode=self.cfg.operating_mode,
                 equilibrium=self.cfg.equilibrium,
                 window_size=self.cfg.window_size,
+                features=self.cfg.features,
                 device=self.device,
             )
 

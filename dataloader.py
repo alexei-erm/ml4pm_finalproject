@@ -73,8 +73,6 @@ class SlidingDataset(Dataset):
         std = self.measurements.std(dim=0, keepdim=True)
         self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
         self.measurements = self.measurements.T
-        print(self.measurements.shape)
-        exit()
 
     def __len__(self) -> int:
         return len(self.start_indices)

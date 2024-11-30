@@ -5,9 +5,9 @@ import torch.nn as nn
 from itertools import chain
 
 
-class SimpleAE(nn.Module):
+class SingleSampleAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
-        super(SimpleAE, self).__init__()
+        super(SingleSampleAE, self).__init__()
 
         sizes = [input_channels, 64, 32, 16]
 
@@ -77,6 +77,55 @@ class ConvAE(nn.Module):
                 conv_transpose_layer(channels[i], channels[i - 1]) for i in range(len(channels) - 1, 0, -1)
             ),
             nn.ConvTranspose1d(channels[0], input_channels, kernel_size=kernel_size, padding=padding),
+        )
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        latent = self.encoder(x)
+        output = self.decoder(latent)
+        return output, latent
+
+
+class SingleChannelAE(nn.Module):
+    def __init__(self, input_channels: int, cfg: Config) -> None:
+        super(SingleChannelAE, self).__init__()
+
+        kernel_size = 3
+        max_pool_size = 2
+        channels = [input_channels, 8, 16, 32, 64, 128]
+        latent_features = 128
+
+        padding = kernel_size // 2
+        conv_output_size = cfg.window_size // (max_pool_size ** (len(channels) - 1))
+
+        self.encoder = nn.Sequential(
+            *chain.from_iterable(
+                (
+                    nn.Conv1d(channels[i], channels[i + 1], kernel_size=kernel_size, padding=padding),
+                    nn.BatchNorm1d(channels[i + 1]),
+                    nn.ReLU(),
+                    nn.MaxPool1d(kernel_size=max_pool_size, stride=max_pool_size),
+                )
+                for i in range(0, len(channels) - 1)
+            ),
+            nn.Flatten(),
+            nn.Linear(conv_output_size * channels[-1], latent_features),
+        )
+
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_features, conv_output_size * channels[-1]),
+            nn.ReLU(),
+            nn.Unflatten(dim=-1, unflattened_size=(channels[-1], conv_output_size)),
+            *chain.from_iterable(
+                (
+                    nn.Upsample(scale_factor=max_pool_size),
+                    nn.ConvTranspose1d(channels[i], channels[i - 1], kernel_size=kernel_size, padding=padding),
+                    nn.BatchNorm1d(channels[i - 1]),
+                    nn.ReLU(),
+                )
+                for i in range(len(channels) - 1, 1, -1)
+            ),
+            nn.Upsample(scale_factor=max_pool_size),
+            nn.ConvTranspose1d(channels[1], channels[0], kernel_size=kernel_size, padding=padding),
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

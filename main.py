@@ -16,13 +16,18 @@ def load_config(args: argparse.Namespace) -> Config:
     except NameError:
         cfg = Config()
 
+    cfg.model = args.model
+
     # Override with CLI args
     for arg, value in args.__dict__.items():
-        if value is not None:
+        if arg in cfg.__dict__ and value is not None:
             cfg.__dict__[arg] = value
 
     if args.transient:
         cfg.equilibrium = False
+
+    if args.features is not None:
+        cfg.features = args.features
 
     return cfg
 
@@ -32,17 +37,31 @@ def get_latest(log_root_dir: str) -> str:
     return os.path.join(log_root_dir, latest)
 
 
+def make_log_name(cfg: Config) -> str:
+    dir = f"{cfg.model}_{cfg.unit}_{cfg.operating_mode}"
+
+    if cfg.equilibrium:
+        dir += "_equilibrium"
+    else:
+        dir += "_transient"
+
+    if cfg.features is not None:
+        for feature in cfg.features:
+            dir += f"_{feature}"
+
+    return dir
+
+
 def main(args: argparse.Namespace) -> None:
     cfg = load_config(args)
 
     seed_all(cfg.seed)
 
-    model_name = f"{cfg.model}_{cfg.unit}_{cfg.operating_mode}"
-    if cfg.transient:
-        model_name += "_transient"
+    if args.log_dir is not None:
+        log_root_dir = args.log_dir
     else:
-        model_name += "_equilibrium"
-    log_root_dir = os.path.abspath(os.path.join("logs", model_name))
+        log_root_dir = make_log_name(cfg)
+    log_root_dir = os.path.abspath(os.path.join("logs", log_root_dir))
 
     print("=" * os.get_terminal_size()[0])
     print("")
@@ -71,28 +90,24 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=None, help="Seed to use for all RNGs.")
+    parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
     parser.add_argument(
-        "--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE", help="Model to train or load."
+        "--model", type=str, choices=["SingleSampleAE", "ConvAE", "SingleChannelAE"], help="Model to train or load."
     )
+    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
     parser.add_argument(
-        "--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None, help="Plant unit to load data for."
-    )
-    parser.add_argument(
-        "--operating_mode",
-        type=str,
-        choices=["pump", "turbine", "short_circuit"],
-        default=None,
-        help="Generator operating mode.",
+        "--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], help="Generator operating mode."
     )
     parser.add_argument("--transient", action="store_true", help="Include transient (non equilibrium) samples.")
+    parser.add_argument(
+        "--features", nargs="+", help="Feature(s) to use for model input. By default, uses all features."
+    )
     parser.add_argument(
         "--dataset_root", type=str, default="Dataset", help="Root path of the folder to load the datasets from."
     )
     parser.add_argument(
         "--log_dir",
         type=str,
-        default=None,
         help="Directly specify the name of the log directory to save the model to or load the model from. "
         "Bypasses the automatic log directory name based on model, unit, mode, etc.",
     )
