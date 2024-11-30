@@ -71,15 +71,34 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE")
-    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None)
-    parser.add_argument("--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], default=None)
-    parser.add_argument("--transient", action="store_true")
-    parser.add_argument("--dataset_root", type=str, default="Dataset")
+    parser.add_argument("--seed", type=int, default=None, help="Seed to use for all RNGs.")
+    parser.add_argument(
+        "--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE", help="Model to train or load."
+    )
+    parser.add_argument(
+        "--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None, help="Plant unit to load data for."
+    )
+    parser.add_argument(
+        "--operating_mode",
+        type=str,
+        choices=["pump", "turbine", "short_circuit"],
+        default=None,
+        help="Generator operating mode.",
+    )
+    parser.add_argument("--transient", action="store_true", help="Include transient (non equilibrium) samples.")
+    parser.add_argument(
+        "--dataset_root", type=str, default="Dataset", help="Root path of the folder to load the datasets from."
+    )
+    parser.add_argument(
+        "--log_dir",
+        type=str,
+        default=None,
+        help="Directly specify the name of the log directory to save the model to or load the model from. "
+        "Bypasses the automatic log directory name based on model, unit, mode, etc.",
+    )
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--train", action="store_true")
-    group.add_argument("--eval", action="store_true")
+    group.add_argument("--train", action="store_true", help="Train the model.")
+    group.add_argument("--eval", action="store_true", help="Evaluate the model.")
     args = parser.parse_args()
 
     main(args)
