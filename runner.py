@@ -123,7 +123,9 @@ class Runner:
                 for x, y in tqdm(loader):
                     labels.append(y.any(dim=-1).squeeze())
 
-                    x[50:200, :, 250:650] -= torch.from_numpy(np.linspace(0.0, 1.0, 400)).to(self.device)
+                    x[50:200, :, x.shape[-1] // 3 : (x.shape[-1] * 2) // 3] -= torch.from_numpy(
+                        np.linspace(0.0, 1.0, (x.shape[-1] * 2) // 3 - x.shape[-1] // 3)
+                    ).to(self.device)
                     reconstruction, latent = self.model(x)
 
                     spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
@@ -144,8 +146,8 @@ class Runner:
                         ly.set_ydata(reconstruction[i, 0, :].cpu().numpy())
                         le.set_ydata((reconstruction - x).square()[i, 0, :].cpu().numpy())
                         print(t2[i].item())
-                        plt.pause(0.1)
-                    exit()
+                        plt.pause(0.05)
+                    # exit()
 
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
