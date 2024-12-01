@@ -89,10 +89,10 @@ class SingleChannelAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SingleChannelAE, self).__init__()
 
-        kernel_size = 3
+        kernel_size = 7
         max_pool_size = 2
-        channels = [input_channels, 8, 16, 32, 64, 128]
-        latent_features = 128
+        channels = [input_channels, 4, 8, 16, 32, 64]
+        latent_features = 256
 
         padding = kernel_size // 2
         conv_output_size = cfg.window_size // (max_pool_size ** (len(channels) - 1))
@@ -104,6 +104,7 @@ class SingleChannelAE(nn.Module):
                     nn.BatchNorm1d(channels[i + 1]),
                     nn.ReLU(),
                     nn.MaxPool1d(kernel_size=max_pool_size, stride=max_pool_size),
+                    nn.Dropout(0.1),
                 )
                 for i in range(0, len(channels) - 1)
             ),

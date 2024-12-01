@@ -83,9 +83,7 @@ class Runner:
 
             writer.add_scalar("Loss/Training", train_loss, epoch + 1)
             writer.add_scalar("Loss/Validation", val_loss, epoch + 1)
-            print(
-                f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:.6f}, Validation Loss = {val_loss:.6f}"
-            )
+            print(f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:7f}, Validation Loss = {val_loss:7f}")
 
     def test_autoencoder(self) -> None:
         if self.cfg.unit == "VG4":
@@ -98,7 +96,7 @@ class Runner:
         self.model.eval()
 
         latent_mean, latent_covariance = self.get_training_latent_statistics()
-        inv_latent_covariance = torch.linalg.inv(latent_covariance)  # + 1e-7 * torch.eye(latent_covariance.shape))
+        inv_latent_covariance = torch.linalg.inv(latent_covariance)
 
         fig, axes = plt.subplots(2, 3)
         axes = axes.flatten()
@@ -123,8 +121,9 @@ class Runner:
             labels = []
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    labels.append(y.squeeze())
+                    labels.append(y.any(dim=-1).squeeze())
 
+                    x[50:200, :, 250:650] -= torch.from_numpy(np.linspace(0.0, 1.0, 400)).to(self.device)
                     reconstruction, latent = self.model(x)
 
                     spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
@@ -134,12 +133,26 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
+                    fig, ax = plt.subplots()
+                    ax.set_ylim(-1, 2)
+                    (lx,) = ax.plot(x[0, 0, :].cpu().numpy(), label="x")
+                    (ly,) = ax.plot(reconstruction[0, 0, :].cpu().numpy(), label="y")
+                    (le,) = ax.plot((reconstruction - x).square()[0, 0, :].cpu().numpy(), label="SPE")
+                    ax.legend()
+                    for i in range(1, x.shape[0]):
+                        lx.set_ydata(x[i, 0, :].cpu().numpy())
+                        ly.set_ydata(reconstruction[i, 0, :].cpu().numpy())
+                        le.set_ydata((reconstruction - x).square()[i, 0, :].cpu().numpy())
+                        print(t2[i].item())
+                        plt.pause(0.1)
+                    exit()
+
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
 
-            spes = spes.clip(max=2.0 * spes.std())
-            t2s = t2s.clip(max=2.0 * t2s.std())
+            # spes = spes.clip(max=2.0 * spes.std())
+            # t2s = t2s.clip(max=2.0 * t2s.std())
             spes = (spes - spes.min()) / (spes.max() - spes.min())
             t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
@@ -147,7 +160,7 @@ class Runner:
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
             ax.set_title(name)
-            fig.legend()
+            ax.legend()
 
             """tpr = []
             fpr = []
