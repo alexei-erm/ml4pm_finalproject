@@ -91,7 +91,7 @@ class Runner:
             return
 
         model_path = os.path.join(self.log_dir, "model.pt")
-        self.model.load_state_dict(torch.load(model_path, weights_only=True))
+        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
 
         self.model.eval()
 
@@ -116,17 +116,21 @@ class Runner:
             )
             loader = DataLoader(dataset, batch_size=self.cfg.batch_size)
 
+            preds = []
+            xs = []
+            labels = []
             spes = []
             t2s = []
-            labels = []
+
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    labels.append(y.any(dim=-1).squeeze())
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 0.5
 
-                    x[50:200, :, x.shape[-1] // 3 : (x.shape[-1] * 2) // 3] -= torch.from_numpy(
-                        np.linspace(0.0, 1.0, (x.shape[-1] * 2) // 3 - x.shape[-1] // 3)
-                    ).to(self.device)
+                    xs.append(x)
+                    labels.append(y)
+
                     reconstruction, latent = self.model(x)
+                    preds.append(reconstruction)
 
                     spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
                     spes.append(spe)
@@ -135,58 +139,34 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
-                    fig, ax = plt.subplots()
-                    ax.set_ylim(-1, 2)
-                    (lx,) = ax.plot(x[0, 0, :].cpu().numpy(), label="x")
-                    (ly,) = ax.plot(reconstruction[0, 0, :].cpu().numpy(), label="y")
-                    (le,) = ax.plot((reconstruction - x).square()[0, 0, :].cpu().numpy(), label="SPE")
-                    ax.legend()
-                    for i in range(1, x.shape[0]):
-                        lx.set_ydata(x[i, 0, :].cpu().numpy())
-                        ly.set_ydata(reconstruction[i, 0, :].cpu().numpy())
-                        le.set_ydata((reconstruction - x).square()[i, 0, :].cpu().numpy())
-                        print(t2[i].item())
-                        plt.pause(0.05)
-                    # exit()
-
+            xs = torch.concatenate(xs).cpu().numpy()
+            preds = torch.concatenate(preds).cpu().numpy()
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
 
-            # spes = spes.clip(max=2.0 * spes.std())
-            # t2s = t2s.clip(max=2.0 * t2s.std())
+            labels = labels[..., -1]
+            xs = xs[..., 0, -1]
+            preds = preds[..., 0, -1]
+
+            # spes = spes.clip(max=spes.mean() + 3.0 * spes.std())
+            # t2s = t2s.clip(max=t2s.mean() + 3.0 * t2s.std())
             spes = (spes - spes.min()) / (spes.max() - spes.min())
             t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
-            ax.plot(labels, label="label")
+            ax.plot(xs, label="x")
+            ax.plot(preds, label="pred")
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
+
+            for start, end in zip(
+                np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]
+            ):
+                ax.axvspan(start, end, color="red", alpha=0.3)
+
             ax.set_title(name)
             ax.legend()
 
-            """tpr = []
-            fpr = []
-            for threshold in np.linspace(spes.min(), spes.max(), 1000):
-                pred = spes > threshold
-
-                tp = np.sum((pred == 1) & (labels == 1).any(axis=-1))
-                fp = np.sum((pred == 1) & (labels == 0).any(axis=-1))
-                tn = np.sum((pred == 0) & (labels == 0).any(axis=-1))
-                fn = np.sum((pred == 0) & (labels == 1).any(axis=-1))
-                tpr.append(tp / (tp + fn) if (tp + fn) > 0 else 0)
-                fpr.append(fp / (fp + tn) if (fp + tn) > 0 else 0)
-
-            tpr = np.array(tpr)
-            fpr = np.array(fpr)
-            RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax[0])"""
-
-            # RocCurveDisplay.from_predictions(y_true=labels.any(axis=-1), y_pred=spes, ax=ax[0], name=name)
-            # RocCurveDisplay.from_predictions(y_true=labels.any(axis=-1), y_pred=t2s, ax=ax[1], name=name)
-
-        # ax[0].plot([0, 1], [0, 1], color="k", linestyle="--")
-        # ax[1].plot([0, 1], [0, 1], color="k", linestyle="--")
-        # ax[0].set_title("SPE")
-        # ax[1].set_title("T2")
         fig.tight_layout()
         plt.show()
 

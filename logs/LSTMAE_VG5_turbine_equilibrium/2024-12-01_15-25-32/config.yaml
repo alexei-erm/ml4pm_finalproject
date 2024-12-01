@@ -1,0 +1,11 @@
+model: LSTMAE
+seed: 42
+unit: VG5
+operating_mode: turbine
+equilibrium: true
+features: null
+window_size: 128
+batch_size: 256
+epochs: 500
+learning_rate: 0.001
+validation_split: 0.2

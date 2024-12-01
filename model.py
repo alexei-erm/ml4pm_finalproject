@@ -1,4 +1,4 @@
-from config import Config
+from config import *
 
 import torch
 import torch.nn as nn
@@ -139,8 +139,8 @@ class LSTMAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(LSTMAE, self).__init__()
 
-        hidden_size = 8
-        num_layers = 2
+        hidden_size = 1
+        num_layers = 1
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
 
@@ -150,7 +150,7 @@ class LSTMAE(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.permute(0, 2, 1)
 
-        latent, (hidden, cell) = self.encoder_lstm(x)
+        latent, _ = self.encoder_lstm(x)
         latent = latent[:, -1, :]
 
         decoder_input = latent.unsqueeze(1).repeat(1, x.shape[1], 1)
