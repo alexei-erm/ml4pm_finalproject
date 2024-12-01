@@ -89,9 +89,9 @@ class SingleChannelAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SingleChannelAE, self).__init__()
 
-        kernel_size = 7
+        kernel_size = 3
         max_pool_size = 2
-        channels = [input_channels, 4, 8, 16, 32, 64]
+        channels = [input_channels, 4, 8, 16, 32, 64, 128]
         latent_features = 256
 
         padding = kernel_size // 2
@@ -133,3 +133,27 @@ class SingleChannelAE(nn.Module):
         latent = self.encoder(x)
         output = self.decoder(latent)
         return output, latent
+
+
+class LSTMAE(nn.Module):
+    def __init__(self, input_channels: int, cfg: Config) -> None:
+        super(LSTMAE, self).__init__()
+
+        hidden_size = 8
+        num_layers = 2
+
+        self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
+
+        self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True)
+        self.decoder_out_fc = nn.Linear(hidden_size, input_channels)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = x.permute(0, 2, 1)
+
+        latent, (hidden, cell) = self.encoder_lstm(x)
+        latent = latent[:, -1, :]
+
+        decoder_input = latent.unsqueeze(1).repeat(1, x.shape[1], 1)
+        reconstruction, _ = self.decoder_lstm(decoder_input)
+        reconstruction = self.decoder_out_fc(reconstruction)
+        return reconstruction.permute(0, 2, 1), latent

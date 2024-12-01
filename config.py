@@ -24,3 +24,8 @@ class SingleSampleAEConfig(Config):
 @dataclass
 class SingleChannelAEConfig(Config):
     window_size: int = 1024
+
+
+@dataclass
+class LSTMAEConfig(Config):
+    window_size: int = 128

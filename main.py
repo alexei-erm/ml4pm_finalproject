@@ -92,7 +92,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
     parser.add_argument(
-        "--model", type=str, choices=["SingleSampleAE", "ConvAE", "SingleChannelAE"], help="Model to train or load."
+        "--model",
+        type=str,
+        choices=["SingleSampleAE", "ConvAE", "SingleChannelAE", "LSTMAE"],
+        help="Model to train or load.",
     )
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
     parser.add_argument(
