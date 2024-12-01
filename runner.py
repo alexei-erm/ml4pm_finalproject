@@ -124,7 +124,7 @@ class Runner:
 
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 0.5
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
 
                     xs.append(x)
                     labels.append(y)

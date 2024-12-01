@@ -64,7 +64,10 @@ class SlidingDataset(Dataset):
 
         # Convert to tensor
         if features is not None:
-            self.measurements = torch.from_numpy(df[features].to_numpy(dtype=np.float32)).to(device)
+            columns = []
+            for feature in features:
+                columns += df.columns[df.columns.to_series().str.match(feature)].to_list()
+            self.measurements = torch.from_numpy(df[columns].to_numpy(dtype=np.float32)).to(device)
         else:
             self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
 
