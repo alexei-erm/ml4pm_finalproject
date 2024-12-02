@@ -54,18 +54,30 @@ class Runner:
         for epoch in range(self.cfg.epochs):
 
             self.model.train()
+
             train_loss = 0.0
+            train_reconstruction_loss = 0.0
+            train_sparsity_loss = 0.0
+
             for x in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{self.cfg.epochs}"):
                 optimizer.zero_grad(set_to_none=True)
 
                 reconstruction, latent = self.model(x)
-                loss = criterion(reconstruction, x)
+
+                reconstruction_loss = criterion(reconstruction, x)
+                sparsity_loss = self.kl_divergence(latent, rho=0.05)
+                beta = 0.01
+                loss = reconstruction_loss + beta * sparsity_loss
                 loss.backward()
                 optimizer.step()
 
                 train_loss += loss.item()
+                train_reconstruction_loss += reconstruction_loss.item()
+                train_sparsity_loss += sparsity_loss.item()
 
             train_loss /= len(train_loader)
+            train_reconstruction_loss /= len(train_loader)
+            train_sparsity_loss /= len(train_loader)
 
             self.model.eval()
             val_loss = 0.0
@@ -82,8 +94,14 @@ class Runner:
                 torch.save(self.model.state_dict(), os.path.join(self.log_dir, "model.pt"))
 
             writer.add_scalar("Loss/Training", train_loss, epoch + 1)
+            writer.add_scalar("Loss/Training_reconstruction", train_reconstruction_loss, epoch + 1)
+            writer.add_scalar("Loss/Training_sparsity", train_sparsity_loss, epoch + 1)
             writer.add_scalar("Loss/Validation", val_loss, epoch + 1)
-            print(f"Epoch {epoch + 1}/{self.cfg.epochs}: Train Loss = {train_loss:7f}, Validation Loss = {val_loss:7f}")
+            print(
+                f"Epoch {epoch + 1}/{self.cfg.epochs}, Loss: Train={train_loss:.7f}, "
+                f"Rec.={train_reconstruction_loss:.7f}, Spars.={train_sparsity_loss:.7f}, "
+                f"Val.={val_loss:.7f}"
+            )
 
     def test_autoencoder(self) -> None:
         if self.cfg.unit == "VG4":
@@ -124,7 +142,7 @@ class Runner:
 
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 0.5
 
                     xs.append(x)
                     labels.append(y)
@@ -196,6 +214,7 @@ class Runner:
             x_test = dataset.measurements
             diff = x_test - mean
             t2 = torch.einsum("ib,ij,jb->b", diff, inv_covariance, diff)
+            print(x_test.shape)
 
             labels = dataset.ground_truth.cpu().numpy()
 
@@ -223,6 +242,7 @@ class Runner:
             # t2 = t2.cpu().numpy()
             # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
 
+            t2 = t2.cpu().numpy()
             fig, ax2 = plt.subplots()
             ax2.plot(labels)
             t2 = t2.clip(max=t2.mean() + 4 * t2.std())
@@ -231,6 +251,36 @@ class Runner:
 
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         plt.legend()
+        plt.show()
+
+    def fit_if(self) -> None:
+        from sklearn.ensemble import IsolationForest
+
+        x = self.training_dataset.measurements
+
+        isolation_forest = IsolationForest(n_estimators=500, max_samples=1.0, max_features=0.5, n_jobs=-1)
+        isolation_forest.fit(x.T.cpu().numpy())
+
+        fig, ax = plt.subplots()
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+            dataset = SlidingLabeledDataset(
+                parquet_file=os.path.join(
+                    self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
+                ),
+                operating_mode=self.cfg.operating_mode,
+                equilibrium=self.cfg.equilibrium,
+                window_size=self.cfg.window_size,
+                features=self.cfg.features,
+                device=self.device,
+            )
+
+            pred = isolation_forest.score_samples(dataset.measurements.T.cpu().numpy())
+            labels = dataset.ground_truth.cpu().numpy()
+
+            RocCurveDisplay.from_predictions(y_true=labels, y_pred=pred, ax=ax, name=name)
+
+        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
+        ax.legend()
         plt.show()
 
     def get_training_latent_features(self) -> torch.Tensor:
@@ -258,3 +308,10 @@ class Runner:
         covariance = (centered @ centered.T) / (num_samples - 1)
 
         return mean.squeeze(), covariance
+
+    def kl_divergence(self, latent: torch.Tensor, rho: float) -> torch.Tensor:
+        # Compute average activation per neuron
+        rho_hat = torch.mean(latent, dim=0)
+        # Compute KL divergence
+        kl = rho * torch.log(rho / rho_hat) + (1 - rho) * torch.log((1 - rho) / (1 - rho_hat))
+        return torch.sum(kl)

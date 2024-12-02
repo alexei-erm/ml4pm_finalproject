@@ -9,7 +9,7 @@ class SingleSampleAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SingleSampleAE, self).__init__()
 
-        sizes = [input_channels, 64, 32, 16]
+        sizes = [input_channels, 16, 8, 4]
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(
@@ -89,9 +89,10 @@ class SingleChannelAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SingleChannelAE, self).__init__()
 
-        kernel_size = 3
+        kernel_size = 5
         max_pool_size = 2
-        channels = [input_channels, 4, 8, 16, 32, 64, 128]
+        # channels = [input_channels, 4, 8, 16, 32, 64, 128]
+        channels = [input_channels, 32, 64, 128, 256, 512]
         latent_features = 256
 
         padding = kernel_size // 2
@@ -143,17 +144,20 @@ class LSTMAE(nn.Module):
         num_layers = 2
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
+        self.encoder_fc = nn.Linear(hidden_size, hidden_size)
 
+        self.decoder_fc = nn.Linear(hidden_size, hidden_size)
         self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True)
         self.decoder_out_fc = nn.Linear(hidden_size, input_channels)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.permute(0, 2, 1)
 
-        latent, _ = self.encoder_lstm(x)
-        latent = latent[:, -1, :]
+        encoder_output, _ = self.encoder_lstm(x)
+        latent = torch.sigmoid(self.encoder_fc(encoder_output[:, -1, :]))
 
-        decoder_input = latent.unsqueeze(1).repeat(1, x.shape[1], 1)
+        decoder_input = self.decoder_fc(latent)
+        decoder_input = decoder_input.unsqueeze(1).repeat(1, x.shape[1], 1)
         reconstruction, _ = self.decoder_lstm(decoder_input)
         reconstruction = self.decoder_out_fc(reconstruction)
         return reconstruction.permute(0, 2, 1), latent

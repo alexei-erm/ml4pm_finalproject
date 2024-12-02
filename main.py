@@ -82,10 +82,15 @@ def main(args: argparse.Namespace) -> None:
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
         runner.test_autoencoder()
 
-    else:
+    elif args.spc:
         log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
         runner.fit_spc()
+
+    else:
+        log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        runner.fit_if()
 
 
 if __name__ == "__main__":
@@ -117,6 +122,7 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--train", action="store_true", help="Train the model.")
     group.add_argument("--eval", action="store_true", help="Evaluate the model.")
+    group.add_argument("--spc", action="store_true", help="Fit simple SPC model.")
     args = parser.parse_args()
 
     main(args)

@@ -23,7 +23,7 @@ class SingleSampleAEConfig(Config):
 
 @dataclass
 class SingleChannelAEConfig(Config):
-    window_size: int = 1024
+    window_size: int = 512
 
 
 @dataclass

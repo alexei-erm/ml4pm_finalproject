@@ -66,7 +66,11 @@ class SlidingDataset(Dataset):
         if features is not None:
             columns = []
             for feature in features:
-                columns += df.columns[df.columns.to_series().str.match(feature)].to_list()
+                matching_columns = df.columns[df.columns.to_series().str.match(feature)].to_list()
+                if len(matching_columns) == 0:
+                    print(f"Selected feature '{feature}' does not match any feature in the dataset.")
+                    exit()
+                columns += matching_columns
             self.measurements = torch.from_numpy(df[columns].to_numpy(dtype=np.float32)).to(device)
         else:
             self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)

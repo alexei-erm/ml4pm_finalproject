@@ -4,8 +4,7 @@ unit: VG5
 operating_mode: turbine
 equilibrium: true
 features:
-- stat_coil_.*
-- stat_magn_.*
+- stat_coil_ph01_01_tmp
 window_size: 256
 batch_size: 256
 epochs: 500
