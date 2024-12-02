@@ -113,7 +113,14 @@ class Runner:
 
         self.model.eval()
 
-        latent_mean, latent_covariance = self.get_training_latent_statistics()
+        train_latent = self.get_training_latent_features()
+
+        from sklearn.svm import OneClassSVM
+
+        ocsvm = OneClassSVM(nu=0.002)
+        ocsvm.fit(train_latent.T)
+
+        latent_mean, latent_covariance = self.get_training_latent_statistics(train_latent)
         inv_latent_covariance = torch.linalg.inv(latent_covariance)
 
         fig, axes = plt.subplots(2, 3)
@@ -139,10 +146,11 @@ class Runner:
             labels = []
             spes = []
             t2s = []
+            svm = []
 
             with torch.no_grad():
                 for x, y in tqdm(loader):
-                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 0.5
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] -= 1.0
 
                     xs.append(x)
                     labels.append(y)
@@ -157,11 +165,14 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
+                    svm.append(ocsvm.predict(latent))
+
             xs = torch.concatenate(xs).cpu().numpy()
             preds = torch.concatenate(preds).cpu().numpy()
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
+            svm = np.concatenate(svm)
 
             labels = labels[..., -1]
             xs = xs[..., 0, -1]
@@ -176,6 +187,7 @@ class Runner:
             ax.plot(preds, label="pred")
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
+            ax.plot(svm, label="OCSVM")
 
             for start, end in zip(
                 np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]
@@ -297,10 +309,8 @@ class Runner:
 
         return torch.concatenate(all_latent).T
 
-    def get_training_latent_statistics(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_training_latent_statistics(self, latent: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns mean and covariance of the latent features commputed on the training set."""
-
-        latent = self.get_training_latent_features()
 
         mean = latent.mean(dim=1, keepdim=True)
         centered = latent - mean
