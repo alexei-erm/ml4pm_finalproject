@@ -1,5 +1,5 @@
 from config import Config
-from dataloader import SlidingDataset, SlidingLabeledDataset, create_dataloaders
+from dataloader import SlidingDataset, create_dataloaders, collate_fn
 from model import *  # noqa F401
 from utils import dump_yaml, dump_pickle
 
@@ -59,7 +59,7 @@ class Runner:
             train_reconstruction_loss = 0.0
             train_sparsity_loss = 0.0
 
-            for x in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{self.cfg.epochs}"):
+            for x, _, _ in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{self.cfg.epochs}"):
                 optimizer.zero_grad(set_to_none=True)
 
                 reconstruction, latent = self.model(x)
@@ -82,7 +82,7 @@ class Runner:
             self.model.eval()
             val_loss = 0.0
             with torch.no_grad():
-                for x in val_loader:
+                for x, _, _ in val_loader:
                     reconstruction, latent = self.model(x)
                     loss = criterion(reconstruction, x)
                     val_loss += loss.item()
@@ -129,7 +129,7 @@ class Runner:
         for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
             ax = axes[i]
 
-            dataset = SlidingLabeledDataset(
+            dataset = SlidingDataset(
                 parquet_file=os.path.join(
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
@@ -139,8 +139,9 @@ class Runner:
                 features=self.cfg.features,
                 device=self.device,
             )
-            loader = DataLoader(dataset, batch_size=self.cfg.batch_size)
+            loader = DataLoader(dataset, batch_size=self.cfg.batch_size, collate_fn=collate_fn)
 
+            indices = []
             preds = []
             xs = []
             labels = []
@@ -149,11 +150,12 @@ class Runner:
             svm = []
 
             with torch.no_grad():
-                for x, y in tqdm(loader):
-                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] -= 1.0
+                for x, y, index in tqdm(loader):
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
 
                     xs.append(x)
                     labels.append(y)
+                    indices.append(index)
 
                     reconstruction, latent = self.model(x)
                     preds.append(reconstruction)
@@ -169,6 +171,7 @@ class Runner:
 
             xs = torch.concatenate(xs).cpu().numpy()
             preds = torch.concatenate(preds).cpu().numpy()
+            indices = np.concatenate(indices)
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
@@ -212,7 +215,7 @@ class Runner:
 
         fig, ax = plt.subplots()
         for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
-            dataset = SlidingLabeledDataset(
+            dataset = SlidingDataset(
                 parquet_file=os.path.join(
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
@@ -226,7 +229,6 @@ class Runner:
             x_test = dataset.measurements
             diff = x_test - mean
             t2 = torch.einsum("ib,ij,jb->b", diff, inv_covariance, diff)
-            print(x_test.shape)
 
             labels = dataset.ground_truth.cpu().numpy()
 
@@ -275,7 +277,7 @@ class Runner:
 
         fig, ax = plt.subplots()
         for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
-            dataset = SlidingLabeledDataset(
+            dataset = SlidingDataset(
                 parquet_file=os.path.join(
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
@@ -298,12 +300,12 @@ class Runner:
     def get_training_latent_features(self) -> torch.Tensor:
         self.model.eval()
 
-        loader = DataLoader(self.training_dataset, batch_size=self.cfg.batch_size)
+        loader = DataLoader(self.training_dataset, batch_size=self.cfg.batch_size, collate_fn=collate_fn)
 
         all_latent = []
 
         with torch.no_grad():
-            for x in tqdm(loader):
+            for x, _, _ in tqdm(loader):
                 reconstruction, latent = self.model(x)
                 all_latent.append(latent)
 
@@ -320,8 +322,8 @@ class Runner:
         return mean.squeeze(), covariance
 
     def kl_divergence(self, latent: torch.Tensor, rho: float) -> torch.Tensor:
-        # Compute average activation per neuron
+        """Computes the KL-divergence of the batch. Input shape (batch_size, n_features)."""
+
         rho_hat = torch.mean(latent, dim=0)
-        # Compute KL divergence
         kl = rho * torch.log(rho / rho_hat) + (1 - rho) * torch.log((1 - rho) / (1 - rho_hat))
         return torch.sum(kl)

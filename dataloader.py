@@ -52,6 +52,7 @@ class SlidingDataset(Dataset):
 
         # Save filtered measurements DataFrame
         self.df = df
+        self.index = df.index.values
 
         # Compute subsequence indices according to window size
         valid_end_indices = (
@@ -84,20 +85,29 @@ class SlidingDataset(Dataset):
     def __len__(self) -> int:
         return len(self.start_indices)
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor | float, np.ndarray]:
         start_index = self.start_indices[index]
         end_index = start_index + self.window_size
-        return self.measurements[:, start_index:end_index]
+        if hasattr(self, "ground_truth"):
+            return (
+                self.measurements[:, start_index:end_index],
+                self.ground_truth[start_index:end_index],
+                self.index[start_index:end_index],
+            )
+        else:
+            return self.measurements[:, start_index:end_index], None, self.index[start_index:end_index]
 
 
-class SlidingLabeledDataset(SlidingDataset):
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        start_index = self.start_indices[index]
-        end_index = start_index + self.window_size
-        return (
-            self.measurements[:, start_index:end_index],
-            self.ground_truth[start_index:end_index],
-        )
+def collate_fn(batch):
+    x, label, index = zip(*batch)
+    x = torch.stack(x)
+    if label[0] is not None:
+        label = torch.stack(label)
+    else:
+        label = None
+    index = np.stack(index)
+
+    return x, label, index
 
 
 def create_dataloaders(dataset: Dataset, batch_size: int, validation_split: float) -> tuple[DataLoader, DataLoader]:
@@ -110,7 +120,12 @@ def create_dataloaders(dataset: Dataset, batch_size: int, validation_split: floa
     train_indices = indices[:-validation_size]
     validation_indices = indices[-validation_size:]
 
-    train_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices))
-    validation_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(validation_indices))
+    train_loader = DataLoader(
+        dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices), collate_fn=collate_fn
+    )
+
+    validation_loader = DataLoader(
+        dataset, batch_size=batch_size, sampler=SubsetRandomSampler(validation_indices), collate_fn=collate_fn
+    )
 
     return train_loader, validation_loader
