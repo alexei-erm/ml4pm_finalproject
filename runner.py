@@ -1,5 +1,5 @@
 from config import Config
-from dataloader import SlidingDataset, create_dataloaders, collate_fn
+from dataloader import *
 from model import *  # noqa F401
 from utils import dump_yaml, dump_pickle
 
@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import RocCurveDisplay
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -40,7 +39,7 @@ class Runner:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
         dump_pickle(os.path.join(self.log_dir, "model.pkl"), self.model)
 
-        train_loader, val_loader = create_dataloaders(
+        train_loader, val_loader = create_train_val_dataloaders(
             self.training_dataset, batch_size=self.cfg.batch_size, validation_split=self.cfg.validation_split
         )
 
@@ -139,7 +138,7 @@ class Runner:
                 features=self.cfg.features,
                 device=self.device,
             )
-            loader = DataLoader(dataset, batch_size=self.cfg.batch_size, collate_fn=collate_fn)
+            loader = create_dataloader(dataset, batch_size=self.cfg.batch_size)
 
             indices = []
             preds = []
@@ -300,7 +299,7 @@ class Runner:
     def get_training_latent_features(self) -> torch.Tensor:
         self.model.eval()
 
-        loader = DataLoader(self.training_dataset, batch_size=self.cfg.batch_size, collate_fn=collate_fn)
+        loader = create_dataloader(self.training_dataset, batch_size=self.cfg.batch_size)
 
         all_latent = []
 

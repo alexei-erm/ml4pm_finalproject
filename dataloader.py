@@ -88,29 +88,25 @@ class SlidingDataset(Dataset):
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor | float, np.ndarray]:
         start_index = self.start_indices[index]
         end_index = start_index + self.window_size
-        if hasattr(self, "ground_truth"):
-            return (
-                self.measurements[:, start_index:end_index],
-                self.ground_truth[start_index:end_index],
-                self.index[start_index:end_index],
-            )
-        else:
-            return self.measurements[:, start_index:end_index], None, self.index[start_index:end_index]
+        ground_truth = self.ground_truth[start_index:end_index] if hasattr(self, "ground_truth") else None
+        return (
+            self.measurements[:, start_index:end_index],
+            ground_truth,
+            self.index[start_index:end_index],
+        )
 
 
 def collate_fn(batch):
     x, label, index = zip(*batch)
     x = torch.stack(x)
-    if label[0] is not None:
-        label = torch.stack(label)
-    else:
-        label = None
+    label = torch.stack(label) if label[0] is not None else None
     index = np.stack(index)
-
     return x, label, index
 
 
-def create_dataloaders(dataset: Dataset, batch_size: int, validation_split: float) -> tuple[DataLoader, DataLoader]:
+def create_train_val_dataloaders(
+    dataset: Dataset, batch_size: int, validation_split: float
+) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
     num_samples = len(dataset)
@@ -129,3 +125,9 @@ def create_dataloaders(dataset: Dataset, batch_size: int, validation_split: floa
     )
 
     return train_loader, validation_loader
+
+
+def create_dataloader(dataset: Dataset, batch_size: int) -> DataLoader:
+    """Creates non-shuffled DataLoader"""
+
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
