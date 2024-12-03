@@ -117,7 +117,7 @@ class Runner:
         from sklearn.svm import OneClassSVM
 
         ocsvm = OneClassSVM(nu=0.002)
-        ocsvm.fit(train_latent.T)
+        ocsvm.fit(train_latent.T.cpu().numpy())
 
         latent_mean, latent_covariance = self.get_training_latent_statistics(train_latent)
         inv_latent_covariance = torch.linalg.inv(latent_covariance)
@@ -150,7 +150,7 @@ class Runner:
 
             with torch.no_grad():
                 for x, y, index in tqdm(loader):
-                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
+                    # x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
 
                     xs.append(x)
                     labels.append(y)
@@ -166,7 +166,7 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
-                    svm.append(ocsvm.predict(latent))
+                    svm.append(ocsvm.predict(latent.cpu().numpy()))
 
             xs = torch.concatenate(xs).cpu().numpy()
             preds = torch.concatenate(preds).cpu().numpy()

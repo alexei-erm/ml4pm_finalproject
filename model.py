@@ -140,11 +140,12 @@ class LSTMAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(LSTMAE, self).__init__()
 
-        hidden_size = 8
+        hidden_size = 16
         num_layers = 2
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
         self.encoder_fc = nn.Linear(hidden_size, hidden_size)
+        self.activation = nn.Sigmoid()
 
         self.decoder_fc = nn.Linear(hidden_size, hidden_size)
         self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True)
@@ -153,8 +154,8 @@ class LSTMAE(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.permute(0, 2, 1)
 
-        encoder_output, _ = self.encoder_lstm(x)
-        latent = torch.sigmoid(self.encoder_fc(encoder_output[:, -1, :]))
+        _, (hidden, _) = self.encoder_lstm(x)
+        latent = self.activation(self.encoder_fc(hidden[-1, ...]))
 
         decoder_input = self.decoder_fc(latent)
         decoder_input = decoder_input.unsqueeze(1).repeat(1, x.shape[1], 1)
