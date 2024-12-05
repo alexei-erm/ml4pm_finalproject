@@ -8,6 +8,7 @@ class Config:
     unit: str = "VG5"
     operating_mode: str = "turbine"
     equilibrium: bool = True
+    features: list[str] = None  
     window_size: int = 64
     batch_size: int = 256
     epochs: int = 500

@@ -169,3 +169,4 @@ cython_debug/
 Dataset/*/*.png
 Dataset/01_data_exploration.ipynb
 Dataset/
+/venv4alpiqfinalproj

@@ -41,8 +41,8 @@ class ConvAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(ConvAE, self).__init__()
 
-        kernel_size = 7
-        channels = [32, 32, 64, 64]
+        kernel_size = 5
+        channels = [16, 32, 64, 64]
         latent_features = 128
         padding = kernel_size // 2
 
@@ -51,12 +51,10 @@ class ConvAE(nn.Module):
                 nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
                 nn.BatchNorm1d(out_channels),
                 nn.ReLU(),
-                # nn.Dropout(0.1),
             )
 
         def conv_transpose_layer(in_channels, out_channels):
             return (
-                # nn.Dropout(0.1),
                 nn.ConvTranspose1d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
                 nn.BatchNorm1d(out_channels),
                 nn.ReLU(),

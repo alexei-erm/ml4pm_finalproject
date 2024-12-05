@@ -5,16 +5,22 @@ import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 
+from typing import Literal
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+
 class SlidingDataset(Dataset):
     def __init__(
         self,
         parquet_file: str,
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         equilibrium: bool,
+        features: list[str] | None,
         window_size: int,
         device: torch.device,
     ) -> None:
-
         assert window_size >= 1
         self.window_size = window_size
         self.device = device
@@ -36,23 +42,31 @@ class SlidingDataset(Dataset):
             "all",
         ]
         df.drop(columns=operating_mode_vars, inplace=True)
+
+        # Handle features selection
+        if features is not None:
+            for feature in features:
+                if feature not in df.columns:
+                    raise ValueError(f"Feature '{feature}' not found. Available: {df.columns.tolist()}")
+            df = df[features]
+
+        # Handle injector openings
+        injector_columns_mask = df.columns.to_series().str.match("injector_0[1-9]_opening")
+        if any(injector_columns_mask):
+            total_opening = df.loc[:, injector_columns_mask].sum(axis=1)
+            df.drop(columns=df.columns[injector_columns_mask], inplace=True)
+            df["total_injector_opening"] = total_opening
+
         assert (df.dtypes == float).all()
 
-        # If the dataset contains labels, separate them from the measurement data
+        # Handle ground truth if present
         if "ground_truth" in df.columns:
             self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy()).to(device)
             df.drop(columns="ground_truth", inplace=True)
 
-        # Aggregate injector openings
-        injector_columns_mask = df.columns.to_series().str.match("injector_0[1-9]_opening")
-        total_injector_opening = df.loc[:, injector_columns_mask].sum(axis=1)
-        df.drop(columns=df.columns[injector_columns_mask], inplace=True)
-        df["total_injector_opening"] = total_injector_opening
-
-        # Save filtered measurements DataFrame
         self.df = df
 
-        # Compute subsequence indices according to window size
+        # Compute indices
         valid_end_indices = (
             df.index.to_series()
             .diff(periods=self.window_size - 1)
@@ -61,7 +75,7 @@ class SlidingDataset(Dataset):
         start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
         self.start_indices = torch.from_numpy(start_indices)
 
-        # Convert to tensor and normalize
+        # Normalize
         self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
         mean = self.measurements.mean(dim=0, keepdim=True)
         std = self.measurements.std(dim=0, keepdim=True)

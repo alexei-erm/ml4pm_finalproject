@@ -27,13 +27,17 @@ class Runner:
         self.training_dataset = SlidingDataset(
             parquet_file=parquet_file,
             operating_mode=cfg.operating_mode,
+            features=cfg.features,
             equilibrium=cfg.equilibrium,
             window_size=cfg.window_size,
             device=device,
         )
 
         model_type = eval(cfg.model)
-        self.model = model_type(input_channels=self.training_dataset.measurements.shape[0], cfg=cfg).to(device)
+        if cfg.features is None:
+            self.model = model_type(input_channels=self.training_dataset.measurements.shape[0], cfg=cfg).to(device)
+        else:
+            self.model = model_type(input_channels=len(cfg.features), cfg=cfg).to(device)
 
     def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)

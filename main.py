@@ -75,6 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=["SimpleAE", "ConvAE"], default="SimpleAE")
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], default=None)
     parser.add_argument("--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], default=None)
+    parser.add_argument("--features", nargs="+", type=str, help="Features to train on (default: all features)")
     parser.add_argument("--transient", action="store_true")
     parser.add_argument("--dataset_root", type=str, default="Dataset")
     group = parser.add_mutually_exclusive_group()

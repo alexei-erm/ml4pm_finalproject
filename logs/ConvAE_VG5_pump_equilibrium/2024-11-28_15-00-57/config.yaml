@@ -1,0 +1,15 @@
+seed: 42
+model: ConvAE
+unit: VG5
+operating_mode: pump
+equilibrium: true
+features: null
+window_size: 64
+batch_size: 256
+epochs: 500
+learning_rate: 0.001
+validation_split: 0.2
+transient: false
+dataset_root: Dataset
+train: true
+eval: false
