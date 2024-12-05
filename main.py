@@ -84,7 +84,7 @@ def main(args: argparse.Namespace) -> None:
 
     print("=" * os.get_terminal_size()[0])
     print("")
-    device = select_device()
+    device = torch.device("cpu") if args.cpu else select_device()
     print(f"Device: {device}")
 
     if args.train:
@@ -115,6 +115,8 @@ def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
+    parser.add_argument("--cpu", action="store_true", help="Use CPU for all Torch operations.")
+    parser.add_argument("--config", type=str, choices=CFG.keys(), help="Configuration to use.")
     parser.add_argument(
         "--model",
         type=str,

@@ -1,4 +1,4 @@
-from config import *
+from config import FullyConnectedAEConfig, ConvolutionalAEConfig, LSTMAEConfig
 
 import torch
 import torch.nn as nn
