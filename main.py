@@ -65,7 +65,8 @@ def main(args: argparse.Namespace) -> None:
 
     print("=" * os.get_terminal_size()[0])
     print("")
-    device = select_device()
+    # device = select_device()
+    device = 'cpu'
     print(f"Device: {device}")
 
     if args.train:
@@ -102,6 +103,7 @@ if __name__ == "__main__":
         choices=["SingleSampleAE", "ConvAE", "SingleChannelAE", "LSTMAE"],
         help="Model to train or load.",
     )
+    parser.add_argument("--batch_size", type=int, help="Batch size for training and evaluation.")
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
     parser.add_argument(
         "--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], help="Generator operating mode."

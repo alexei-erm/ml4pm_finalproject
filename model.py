@@ -144,21 +144,23 @@ class LSTMAE(nn.Module):
         num_layers = 2
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
+        self.encoder_dropout = nn.Dropout(0.2)
         self.encoder_fc = nn.Linear(hidden_size, hidden_size)
         self.activation = nn.Sigmoid()
 
         self.decoder_fc = nn.Linear(hidden_size, hidden_size)
         self.decoder_lstm = nn.LSTM(hidden_size, hidden_size, num_layers, batch_first=True)
+        self.decoder_dropout = nn.Dropout(0.2)
         self.decoder_out_fc = nn.Linear(hidden_size, input_channels)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = x.permute(0, 2, 1)
 
         _, (hidden, _) = self.encoder_lstm(x)
-        latent = self.activation(self.encoder_fc(hidden[-1, ...]))
+        latent = self.activation(self.encoder_fc(self.encoder_dropout(hidden[-1, ...])))
 
         decoder_input = self.decoder_fc(latent)
         decoder_input = decoder_input.unsqueeze(1).repeat(1, x.shape[1], 1)
         reconstruction, _ = self.decoder_lstm(decoder_input)
-        reconstruction = self.decoder_out_fc(reconstruction)
+        reconstruction = self.decoder_out_fc(self.decoder_dropout(reconstruction))
         return reconstruction.permute(0, 2, 1), latent
