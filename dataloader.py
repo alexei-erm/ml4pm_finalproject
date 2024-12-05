@@ -2,7 +2,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, SequentialSampler
 
 
 class SlidingDataset(Dataset):
@@ -85,7 +85,7 @@ class SlidingDataset(Dataset):
     def __len__(self) -> int:
         return len(self.start_indices)
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor | float, np.ndarray]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor | None, np.ndarray]:
         start_index = self.start_indices[index]
         end_index = start_index + self.window_size
         ground_truth = self.ground_truth[start_index:end_index] if hasattr(self, "ground_truth") else None
@@ -105,14 +105,15 @@ def collate_fn(batch):
 
 
 def create_train_val_dataloaders(
-    dataset: Dataset, batch_size: int, validation_split: float
+    dataset: Dataset, batch_size: int, validation_split: float, subsampling: int = 1
 ) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
     num_samples = len(dataset)
-    validation_size = int(validation_split * num_samples)
     indices = np.arange(num_samples)
     np.random.shuffle(indices)
+    indices = indices[::subsampling]
+    validation_size = int(validation_split * len(indices))
     train_indices = indices[:-validation_size]
     validation_indices = indices[-validation_size:]
 

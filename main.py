@@ -53,6 +53,25 @@ def make_log_name(cfg: Config) -> str:
 
 
 def main(args: argparse.Namespace) -> None:
+    model = LSTMAE(
+        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.0, fc_hidden_sizes=[17, 32], latent_sigmoid=False)
+    )
+    print(model)
+    model = LSTMAE(
+        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.0, fc_hidden_sizes=[17, 32], latent_sigmoid=True)
+    )
+    print(model)
+    model = LSTMAE(
+        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.2, fc_hidden_sizes=[17, 32], latent_sigmoid=False)
+    )
+    print(model)
+    model = LSTMAE(
+        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.2, fc_hidden_sizes=[17, 32], latent_sigmoid=True)
+    )
+    print(model)
+
+    exit()
+
     cfg = load_config(args)
 
     seed_all(cfg.seed)
@@ -99,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        choices=["SingleSampleAE", "ConvAE", "SingleChannelAE", "LSTMAE"],
+        choices=["FullyConnectedAE", "ConvolutionalAE", "LSTMAE"],
         help="Model to train or load.",
     )
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
@@ -119,6 +138,7 @@ if __name__ == "__main__":
         help="Directly specify the name of the log directory to save the model to or load the model from. "
         "Bypasses the automatic log directory name based on model, unit, mode, etc.",
     )
+    parser.add_argument("--subsampling", type=int, help="Subsampling for training samples.")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--train", action="store_true", help="Train the model.")
     group.add_argument("--eval", action="store_true", help="Evaluate the model.")

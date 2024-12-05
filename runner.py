@@ -41,7 +41,10 @@ class Runner:
         dump_pickle(os.path.join(self.log_dir, "model.pkl"), self.model)
 
         train_loader, val_loader = create_train_val_dataloaders(
-            self.training_dataset, batch_size=self.cfg.batch_size, validation_split=self.cfg.validation_split
+            self.training_dataset,
+            batch_size=self.cfg.batch_size,
+            validation_split=self.cfg.validation_split,
+            subsampling=self.cfg.subsampling,
         )
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate)
@@ -66,7 +69,7 @@ class Runner:
 
                 reconstruction_loss = criterion(reconstruction, x)
                 sparsity_loss = self.kl_divergence(latent, rho=0.05)
-                beta = 0.01
+                beta = 0.1
                 loss = reconstruction_loss + beta * sparsity_loss
                 loss.backward()
                 optimizer.step()
@@ -117,14 +120,18 @@ class Runner:
 
         from sklearn.svm import OneClassSVM
 
-        ocsvm = OneClassSVM(nu=0.002)
-        ocsvm.fit(train_latent.T.cpu().numpy())
+        # ocsvm = OneClassSVM(nu=0.002)
+        # ocsvm.fit(train_latent.T.cpu().numpy())
 
         latent_mean, latent_covariance = self.get_training_latent_statistics(train_latent)
-        inv_latent_covariance = torch.linalg.inv(latent_covariance)
+        inv_latent_covariance = torch.linalg.inv(latent_covariance + 1e-7 * torch.eye(latent_covariance.shape[0]))
 
-        fig, axes = plt.subplots(2, 3)
-        axes = axes.flatten()
+        figs = []
+        axes = []
+        for _ in range(6):
+            fig, ax = plt.subplots()
+            figs.append(fig)
+            axes.append(ax)
 
         for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
             ax = axes[i]
@@ -139,6 +146,9 @@ class Runner:
                 features=self.cfg.features,
                 device=self.device,
             )
+            if len(dataset) == 0:
+                continue
+
             loader = create_dataloader(dataset, batch_size=self.cfg.batch_size)
 
             indices = []
@@ -151,7 +161,7 @@ class Runner:
 
             with torch.no_grad():
                 for x, y, index in tqdm(loader):
-                    # x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
+                    x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 1.0
 
                     xs.append(x)
                     labels.append(y)
@@ -167,7 +177,7 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
-                    svm.append(ocsvm.predict(latent.cpu().numpy()))
+                    # svm.append(ocsvm.predict(latent.cpu().numpy()))
 
             xs = torch.concatenate(xs).cpu().numpy()
             preds = torch.concatenate(preds).cpu().numpy()
@@ -175,7 +185,7 @@ class Runner:
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
-            svm = np.concatenate(svm)
+            # svm = np.concatenate(svm)
 
             # df = pd.DataFrame(xs.flatten(), index=indices.flatten())
             # df.sort_index(inplace=True)
@@ -194,12 +204,19 @@ class Runner:
             spes = (spes - spes.min()) / (spes.max() - spes.min())
             t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
-            ax.plot(indices, xs, label="x")
+            # Find gaps in timestamps
+            gaps = np.diff(indices) > np.timedelta64(30, "s")
+            gap_indices = np.nonzero(gaps)[0] + 1
+
+            # for idx in gap_indices:
+            #    ax.axvline(x=idx, color="k", linestyle="--", label="Gap" if idx == gap_indices[0] else None)
+
+            ax.plot(xs, label="x")
             ax.tick_params(axis="x", labelrotation=45)
             ax.plot(preds, label="pred")
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
-            ax.plot(svm, label="OCSVM")
+            # ax.plot(svm, label="OCSVM")
             # ax.step(indices, labels, label="label")
 
             for start, end in zip(
@@ -210,7 +227,8 @@ class Runner:
             ax.set_title(name)
             ax.legend()
 
-        fig.tight_layout()
+        for fig in figs:
+            fig.tight_layout()
         plt.show()
 
     def fit_spc(self) -> None:
