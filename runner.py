@@ -7,6 +7,7 @@ import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.metrics import RocCurveDisplay
 import torch
 import torch.nn as nn
@@ -176,6 +177,14 @@ class Runner:
             t2s = torch.concatenate(t2s).cpu().numpy()
             svm = np.concatenate(svm)
 
+            # df = pd.DataFrame(xs.flatten(), index=indices.flatten())
+            # df.sort_index(inplace=True)
+            # df = df.iloc[: len(df) // 10, :]
+            # sns.lineplot(df)
+            # plt.show()
+            # exit()
+
+            indices = indices[..., -1]
             labels = labels[..., -1]
             xs = xs[..., 0, -1]
             preds = preds[..., 0, -1]
@@ -185,11 +194,13 @@ class Runner:
             spes = (spes - spes.min()) / (spes.max() - spes.min())
             t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
-            ax.plot(xs, label="x")
+            ax.plot(indices, xs, label="x")
+            ax.tick_params(axis="x", labelrotation=45)
             ax.plot(preds, label="pred")
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
             ax.plot(svm, label="OCSVM")
+            # ax.step(indices, labels, label="label")
 
             for start, end in zip(
                 np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]

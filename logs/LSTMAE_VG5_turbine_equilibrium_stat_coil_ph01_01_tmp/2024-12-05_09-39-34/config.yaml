@@ -4,8 +4,8 @@ unit: VG5
 operating_mode: turbine
 equilibrium: true
 features:
-- stat_coil_.*
-window_size: 128
+- stat_coil_ph01_01_tmp
+window_size: 64
 batch_size: 256
 epochs: 500
 learning_rate: 0.001

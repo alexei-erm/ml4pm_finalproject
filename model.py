@@ -89,7 +89,7 @@ class SingleChannelAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(SingleChannelAE, self).__init__()
 
-        kernel_size = 5
+        kernel_size = 3
         max_pool_size = 2
         # channels = [input_channels, 4, 8, 16, 32, 64, 128]
         channels = [input_channels, 32, 64, 128, 256, 512]
@@ -140,7 +140,7 @@ class LSTMAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(LSTMAE, self).__init__()
 
-        hidden_size = 16
+        hidden_size = 8
         num_layers = 2
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)

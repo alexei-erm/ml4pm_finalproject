@@ -28,4 +28,4 @@ class SingleChannelAEConfig(Config):
 
 @dataclass
 class LSTMAEConfig(Config):
-    window_size: int = 256
+    window_size: int = 64
