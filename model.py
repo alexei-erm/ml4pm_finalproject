@@ -6,10 +6,10 @@ from itertools import chain
 
 
 class FullyConnectedAE(nn.Module):
-    def __init__(self, input_channels: int, cfg: FullyConnectedAEConfig) -> None:
+    def __init__(self, input_channels: int, window_size: int, cfg: FullyConnectedAEConfig) -> None:
         super(FullyConnectedAE, self).__init__()
 
-        sizes = [input_channels] + cfg.hidden_sizes
+        sizes = [input_channels * window_size] + cfg.hidden_sizes
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(
@@ -40,13 +40,13 @@ class FullyConnectedAE(nn.Module):
 
 
 class ConvolutionalAE(nn.Module):
-    def __init__(self, input_channels: int, cfg: ConvolutionalAEConfig) -> None:
+    def __init__(self, input_channels: int, window_size: int, cfg: ConvolutionalAEConfig) -> None:
         super(ConvolutionalAE, self).__init__()
 
         channels = [input_channels] + cfg.channels
 
         padding = cfg.kernel_size // 2
-        conv_output_size = cfg.window_size // (cfg.max_pool_size ** (len(channels) - 1))
+        conv_output_size = window_size // (cfg.max_pool_size ** (len(channels) - 1))
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, MISSING
 
 
 @dataclass
@@ -10,7 +10,6 @@ class FullyConnectedAEConfig:
 
 @dataclass
 class ConvolutionalAEConfig:
-    window_size: int
     channels: list[int]
     hidden_sizes: list[int]
     kernel_size: int
@@ -30,15 +29,16 @@ class LSTMAEConfig:
 
 @dataclass
 class Config:
-    model: str = "NONAME"
+    model = MISSING
+    model_cfg = MISSING
     seed: int = 42
     unit: str = "VG5"
     operating_mode: str = "turbine"
     equilibrium: bool = True
     features: list[str] | None = None
-    window_size: int = 64
+    window_size: int = 256
     batch_size: int = 256
     epochs: int = 500
     learning_rate: float = 1e-3
     validation_split: float = 0.2
-    subsampling: int = 1
+    subsampling: int = 1  # Simple subsampling when creating dataloaders
