@@ -65,7 +65,7 @@ class Runner:
 
                 reconstruction_loss = criterion(reconstruction, x)
                 sparsity_loss = self.kl_divergence(latent, rho=0.05)
-                beta = 0.01
+                beta = 0.001
                 loss = reconstruction_loss + beta * sparsity_loss
                 loss.backward()
                 optimizer.step()
@@ -107,17 +107,17 @@ class Runner:
             print("Evaluation is not possible with VG4")
             return
 
-        model_path = os.path.join(self.log_dir, "model.pt")
+        model_path = self.log_dir
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
 
         self.model.eval()
 
         train_latent = self.get_training_latent_features()
 
-        from sklearn.svm import OneClassSVM
+        # from sklearn.svm import OneClassSVM
 
-        ocsvm = OneClassSVM(nu=0.002)
-        ocsvm.fit(train_latent.T.cpu().numpy())
+        # ocsvm = OneClassSVM(nu=0.002)
+        # ocsvm.fit(train_latent.T.cpu().numpy())
 
         latent_mean, latent_covariance = self.get_training_latent_statistics(train_latent)
         inv_latent_covariance = torch.linalg.inv(latent_covariance)
@@ -146,7 +146,7 @@ class Runner:
             labels = []
             spes = []
             t2s = []
-            svm = []
+            # svm = []
 
             with torch.no_grad():
                 for x, y, index in tqdm(loader):
@@ -166,7 +166,7 @@ class Runner:
                     t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                     t2s.append(t2)
 
-                    svm.append(ocsvm.predict(latent.cpu().numpy()))
+                    # svm.append(ocsvm.predict(latent.cpu().numpy()))
 
             xs = torch.concatenate(xs).cpu().numpy()
             preds = torch.concatenate(preds).cpu().numpy()
@@ -174,7 +174,7 @@ class Runner:
             labels = torch.concatenate(labels).cpu().numpy()
             spes = torch.concatenate(spes).cpu().numpy()
             t2s = torch.concatenate(t2s).cpu().numpy()
-            svm = np.concatenate(svm)
+            # svm = np.concatenate(svm)
 
             labels = labels[..., -1]
             xs = xs[..., 0, -1]
@@ -185,11 +185,11 @@ class Runner:
             spes = (spes - spes.min()) / (spes.max() - spes.min())
             t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
 
-            ax.plot(xs, label="x")
-            ax.plot(preds, label="pred")
+            ax.plot(xs, label="x", marker="o", linestyle='None')
+            ax.plot(preds, label="pred", marker="o", linestyle='None')
             ax.plot(spes, label="SPE")
             ax.plot(t2s, label="T2")
-            ax.plot(svm, label="OCSVM")
+            # ax.plot(svm, label="OCSVM")
 
             for start, end in zip(
                 np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]

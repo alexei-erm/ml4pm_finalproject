@@ -65,10 +65,12 @@ def main(args: argparse.Namespace) -> None:
 
     print("=" * os.get_terminal_size()[0])
     print("")
-    # device = select_device()
-    device = 'cpu'
+    if args.cpu is True:
+        device = "cpu"
+    else:
+        device = select_device()
     print(f"Device: {device}")
-
+    
     if args.train:
         log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
         print(f"Saving model and logs to: {log_dir}")
@@ -97,6 +99,7 @@ def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
+    parser.add_argument("--cpu", action="store_true", help="Evaluate the model.")
     parser.add_argument(
         "--model",
         type=str,

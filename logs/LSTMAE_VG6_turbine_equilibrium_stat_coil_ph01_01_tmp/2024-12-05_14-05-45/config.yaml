@@ -1,0 +1,12 @@
+model: LSTMAE
+seed: 42
+unit: VG6
+operating_mode: turbine
+equilibrium: true
+features:
+- stat_coil_ph01_01_tmp
+window_size: 256
+batch_size: 256
+epochs: 500
+learning_rate: 0.001
+validation_split: 0.2

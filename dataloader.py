@@ -4,7 +4,6 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
-
 class SlidingDataset(Dataset):
     def __init__(
         self,
@@ -14,6 +13,7 @@ class SlidingDataset(Dataset):
         window_size: int,
         device: torch.device,
         features: list[str] | None = None,
+        sampling_rate: int | None = None,
     ) -> None:
 
         assert window_size >= 1
@@ -22,6 +22,14 @@ class SlidingDataset(Dataset):
 
         # Load file
         df = pd.read_parquet(parquet_file)
+
+        # Apply sampling if rate is specified
+        if sampling_rate is not None:
+            offset = sampling_rate // 2
+            df = df.iloc[offset::sampling_rate]
+            time_delta = pd.Timedelta(seconds=30 * sampling_rate)
+        else:
+            time_delta = pd.Timedelta(seconds=30)
 
         # Filter operating mode
         if equilibrium:
@@ -58,7 +66,7 @@ class SlidingDataset(Dataset):
         valid_end_indices = (
             df.index.to_series()
             .diff(periods=self.window_size - 1)
-            .eq((self.window_size - 1) * pd.Timedelta(seconds=30))
+            .eq((self.window_size - 1) * time_delta)
         )
         start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
         self.start_indices = torch.from_numpy(start_indices)

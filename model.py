@@ -140,7 +140,7 @@ class LSTMAE(nn.Module):
     def __init__(self, input_channels: int, cfg: Config) -> None:
         super(LSTMAE, self).__init__()
 
-        hidden_size = 16
+        hidden_size = 32
         num_layers = 2
 
         self.encoder_lstm = nn.LSTM(input_channels, hidden_size, num_layers, batch_first=True)
