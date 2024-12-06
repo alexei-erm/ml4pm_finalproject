@@ -27,7 +27,7 @@ class Runner:
         self.training_dataset = SlidingDataset(
             parquet_file=parquet_file,
             operating_mode=cfg.operating_mode,
-            equilibrium=cfg.equilibrium,
+            transient=cfg.transient,
             window_size=cfg.window_size,
             device=device,
             features=cfg.features,
@@ -141,7 +141,7 @@ class Runner:
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
                 operating_mode=self.cfg.operating_mode,
-                equilibrium=self.cfg.equilibrium,
+                transient=self.cfg.transient,
                 window_size=self.cfg.window_size,
                 features=self.cfg.features,
                 device=self.device,
@@ -248,7 +248,7 @@ class Runner:
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
                 operating_mode=self.cfg.operating_mode,
-                equilibrium=self.cfg.equilibrium,
+                transient=self.cfg.transient,
                 window_size=self.cfg.window_size,
                 features=self.cfg.features,
                 device=self.device,
@@ -310,7 +310,7 @@ class Runner:
                     self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
                 ),
                 operating_mode=self.cfg.operating_mode,
-                equilibrium=self.cfg.equilibrium,
+                transient=self.cfg.transient,
                 window_size=self.cfg.window_size,
                 features=self.cfg.features,
                 device=self.device,

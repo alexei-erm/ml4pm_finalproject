@@ -2,7 +2,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, SequentialSampler
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 
 class SlidingDataset(Dataset):
@@ -10,7 +10,7 @@ class SlidingDataset(Dataset):
         self,
         parquet_file: str,
         operating_mode: Literal["turbine", "pump", "short_circuit"],
-        equilibrium: bool,
+        transient: bool,
         window_size: int,
         device: torch.device,
         features: list[str] | None = None,
@@ -24,10 +24,10 @@ class SlidingDataset(Dataset):
         df = pd.read_parquet(parquet_file)
 
         # Filter operating mode
-        if equilibrium:
-            df = df[df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
-        else:
+        if transient:
             df = df[df[f"{operating_mode}_mode"]]
+        else:
+            df = df[df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
 
         # Remove operating mode variables from data
         operating_mode_vars = [var for var in df.columns if "mode" in var] + [

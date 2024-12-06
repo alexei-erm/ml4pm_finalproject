@@ -36,7 +36,7 @@ class Config:
     seed: int = 42
     unit: str = "VG5"
     operating_mode: str = "turbine"
-    equilibrium: bool = True
+    transient: bool = False
     window_size: int = 256
     batch_size: int = 256
     epochs: int = 500
