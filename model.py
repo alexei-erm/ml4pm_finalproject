@@ -46,7 +46,7 @@ class ConvolutionalAE(nn.Module):
         channels = [input_channels] + cfg.channels
 
         padding = cfg.kernel_size // 2
-        conv_output_size = window_size // (cfg.max_pool_size ** (len(channels) - 1))
+        conv_output_size = window_size // (cfg.max_pool_size ** len(cfg.channels))
 
         self.encoder = nn.Sequential(
             *chain.from_iterable(

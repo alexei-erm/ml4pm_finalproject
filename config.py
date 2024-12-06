@@ -55,10 +55,39 @@ def inherit(base_config: Any, **overrides: Any) -> Any:
 
 
 CFG: dict[str, Config] = {}
+
 CFG["OneSample"] = Config(
     model="FullyConnectedAE",
-    model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16, 8], dropout=0.2, latent_sigmoid=False),
-    features=[],
+    model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16], dropout=0.2, latent_sigmoid=False),
+    features=[".*_tmp"],
     window_size=1,
+    measurement_downsampling=16,
 )
-CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.01)
+CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=1.0)
+
+CFG["Conv"] = Config(
+    model="ConvolutionalAE",
+    model_cfg=ConvolutionalAEConfig(
+        channels=[4, 8, 16],
+        hidden_sizes=[32, 8],
+        kernel_size=3,
+        max_pool_size=2,
+        dropout=0.1,
+        latent_sigmoid=False,
+    ),
+    features=["stat_coil_ph01_01_tmp"],
+    window_size=32,
+    measurement_downsampling=10,
+)
+
+CFG["LSTM"] = Config(
+    model="LSTMAE",
+    model_cfg=LSTMAEConfig(hidden_size=32, num_layers=1, dropout=0.2, fc_hidden_sizes=[32], latent_sigmoid=False),
+    features=["stat_coil_ph01_01_tmp"],
+    window_size=32,
+    measurement_downsampling=32,
+)
+CFG["LSTMSparse"] = inherit(
+    CFG["LSTM"],
+    l1_weight=1.0,
+)
