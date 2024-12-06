@@ -7,7 +7,6 @@ import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.metrics import RocCurveDisplay
 import torch
 import torch.nn as nn
@@ -31,20 +30,24 @@ class Runner:
             window_size=cfg.window_size,
             device=device,
             features=cfg.features,
+            downsampling=cfg.measurement_downsampling,
         )
 
         model_type = eval(cfg.model)
-        self.model = model_type(input_channels=self.training_dataset.measurements.shape[0], cfg=cfg).to(device)
+        self.model = model_type(
+            input_channels=self.training_dataset.measurements.shape[0], window_size=cfg.window_size, cfg=cfg.model_cfg
+        ).to(device)
 
     def train_autoencoder(self) -> None:
         dump_yaml(os.path.join(self.log_dir, "config.yaml"), self.cfg)
+        dump_pickle(os.path.join(self.log_dir, "config.pkl"), self.cfg)
         dump_pickle(os.path.join(self.log_dir, "model.pkl"), self.model)
 
         train_loader, val_loader = create_train_val_dataloaders(
             self.training_dataset,
             batch_size=self.cfg.batch_size,
             validation_split=self.cfg.validation_split,
-            subsampling=self.cfg.subsampling,
+            subsampling=self.cfg.training_subsampling,
         )
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.learning_rate)
@@ -58,9 +61,10 @@ class Runner:
 
             self.model.train()
 
-            train_loss = 0.0
-            train_reconstruction_loss = 0.0
-            train_sparsity_loss = 0.0
+            total_loss = 0.0
+            total_reconstruction_loss = 0.0
+            total_kl_loss = 0.0
+            total_l1_loss = 0.0
 
             for x, _, _ in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{self.cfg.epochs}"):
                 optimizer.zero_grad(set_to_none=True)
@@ -68,42 +72,56 @@ class Runner:
                 reconstruction, latent = self.model(x)
 
                 reconstruction_loss = criterion(reconstruction, x)
-                sparsity_loss = self.kl_divergence(latent, rho=0.05)
-                beta = 0.1
-                loss = reconstruction_loss + beta * sparsity_loss
+                loss = reconstruction_loss
+                total_reconstruction_loss += reconstruction_loss.item()
+
+                if self.cfg.kl_divergence_weight > 0.0:
+                    kl_loss = self.cfg.kl_divergence_weight * self.kl_divergence(latent, rho=self.cfg.kl_divergence_rho)
+                    loss += kl_loss
+                    total_kl_loss += kl_loss.item()
+
+                if self.cfg.l1_weight > 0.0:
+                    l1_loss = self.cfg.l1_weight * torch.mean(torch.abs(latent))
+                    loss += l1_loss
+                    total_l1_loss += l1_loss.item()
+
+                total_loss += loss.item()
+
                 loss.backward()
                 optimizer.step()
 
-                train_loss += loss.item()
-                train_reconstruction_loss += reconstruction_loss.item()
-                train_sparsity_loss += sparsity_loss.item()
-
-            train_loss /= len(train_loader)
-            train_reconstruction_loss /= len(train_loader)
-            train_sparsity_loss /= len(train_loader)
+            total_loss /= len(train_loader)
+            total_reconstruction_loss /= len(train_loader)
+            total_kl_loss /= len(train_loader)
+            total_l1_loss /= len(train_loader)
 
             self.model.eval()
-            val_loss = 0.0
+
+            total_val_loss = 0.0
             with torch.no_grad():
                 for x, _, _ in val_loader:
                     reconstruction, latent = self.model(x)
                     loss = criterion(reconstruction, x)
-                    val_loss += loss.item()
+                    total_val_loss += loss.item()
 
-            val_loss /= len(val_loader)
+            total_val_loss /= len(val_loader)
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if total_val_loss < best_val_loss:
+                best_val_loss = total_val_loss
                 torch.save(self.model.state_dict(), os.path.join(self.log_dir, "model.pt"))
 
-            writer.add_scalar("Loss/Training", train_loss, epoch + 1)
-            writer.add_scalar("Loss/Training_reconstruction", train_reconstruction_loss, epoch + 1)
-            writer.add_scalar("Loss/Training_sparsity", train_sparsity_loss, epoch + 1)
-            writer.add_scalar("Loss/Validation", val_loss, epoch + 1)
+            writer.add_scalar("Loss/Training", total_loss, epoch + 1)
+            writer.add_scalar("Loss/Training_reconstruction", total_reconstruction_loss, epoch + 1)
+            writer.add_scalar("Loss/Training_kl", total_kl_loss, epoch + 1)
+            writer.add_scalar("Loss/Training_l1", total_l1_loss, epoch + 1)
+            writer.add_scalar("Loss/Validation", total_val_loss, epoch + 1)
             print(
-                f"Epoch {epoch + 1}/{self.cfg.epochs}, Loss: Train={train_loss:.7f}, "
-                f"Rec.={train_reconstruction_loss:.7f}, Spars.={train_sparsity_loss:.7f}, "
-                f"Val.={val_loss:.7f}"
+                f"Epoch {epoch + 1}/{self.cfg.epochs}, "
+                f"Loss: Train={total_loss:.7f}, "
+                f"Rec.={total_reconstruction_loss:.7f}, "
+                f"KL={total_kl_loss:.7f}, "
+                f"L1={total_l1_loss:.7f}, "
+                f"Val.={total_val_loss:.7f}"
             )
 
     def test_autoencoder(self) -> None:
@@ -124,7 +142,9 @@ class Runner:
         # ocsvm.fit(train_latent.T.cpu().numpy())
 
         latent_mean, latent_covariance = self.get_training_latent_statistics(train_latent)
-        inv_latent_covariance = torch.linalg.inv(latent_covariance + 1e-7 * torch.eye(latent_covariance.shape[0]))
+        inv_latent_covariance = torch.linalg.inv(
+            latent_covariance + 1e-7 * torch.eye(latent_covariance.shape[0], device=self.device)
+        )
 
         figs = []
         axes = []
@@ -145,6 +165,7 @@ class Runner:
                 window_size=self.cfg.window_size,
                 features=self.cfg.features,
                 device=self.device,
+                downsampling=self.cfg.measurement_downsampling,
             )
             if len(dataset) == 0:
                 continue
@@ -252,6 +273,7 @@ class Runner:
                 window_size=self.cfg.window_size,
                 features=self.cfg.features,
                 device=self.device,
+                downsampling=self.cfg.measurement_downsampling,
             )
 
             x_test = dataset.measurements
@@ -293,36 +315,6 @@ class Runner:
 
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         plt.legend()
-        plt.show()
-
-    def fit_if(self) -> None:
-        from sklearn.ensemble import IsolationForest
-
-        x = self.training_dataset.measurements
-
-        isolation_forest = IsolationForest(n_estimators=500, max_samples=1.0, max_features=0.5, n_jobs=-1)
-        isolation_forest.fit(x.T.cpu().numpy())
-
-        fig, ax = plt.subplots()
-        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
-            dataset = SlidingDataset(
-                parquet_file=os.path.join(
-                    self.dataset_root, "synthetic_anomalies", f"{self.cfg.unit}_anomaly_{name}.parquet"
-                ),
-                operating_mode=self.cfg.operating_mode,
-                transient=self.cfg.transient,
-                window_size=self.cfg.window_size,
-                features=self.cfg.features,
-                device=self.device,
-            )
-
-            pred = isolation_forest.score_samples(dataset.measurements.T.cpu().numpy())
-            labels = dataset.ground_truth.cpu().numpy()
-
-            RocCurveDisplay.from_predictions(y_true=labels, y_pred=pred, ax=ax, name=name)
-
-        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
-        ax.legend()
         plt.show()
 
     def get_training_latent_features(self) -> torch.Tensor:

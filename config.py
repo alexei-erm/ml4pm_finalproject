@@ -41,10 +41,12 @@ class Config:
     batch_size: int = 256
     epochs: int = 500
     learning_rate: float = 1e-3
-    latent_kl_divergence: float = 0.0
-    latent_l1: float = 0.0
+    kl_divergence_weight: float = 0.0
+    kl_divergence_rho: float = 0.05
+    l1_weight: float = 0.0
     validation_split: float = 0.2
-    subsampling: int = 1
+    training_subsampling: int = 1
+    measurement_downsampling: int = 1
 
 
 def inherit(base_config: Any, **overrides: Any) -> Any:
@@ -52,11 +54,11 @@ def inherit(base_config: Any, **overrides: Any) -> Any:
     return base_config.__class__(**{**base_config.__dict__, **overrides})
 
 
-CFG = {}
+CFG: dict[str, Config] = {}
 CFG["OneSample"] = Config(
     model="FullyConnectedAE",
     model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16, 8], dropout=0.2, latent_sigmoid=False),
     features=[],
     window_size=1,
 )
-CFG["OneSampleSparse"] = inherit(CFG["OneSample"], latent_l1=0.01)
+CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.01)

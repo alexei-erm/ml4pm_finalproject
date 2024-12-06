@@ -158,7 +158,28 @@ def class_to_dict(obj: object) -> dict[str, Any]:
 
 # Adapted from
 # https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/yaml.py
-def dump_yaml(filename: str, data: dict | object, sort_keys: bool = False):
+def load_yaml(filename: str) -> dict:
+    """Loads an input YAML file safely.
+
+    Args:
+        filename: The path to YAML file.
+
+    Raises:
+        FileNotFoundError: When the specified file does not exist.
+
+    Returns:
+        The data read from the input file.
+    """
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"File not found: {filename}")
+    with open(filename) as f:
+        data = yaml.full_load(f)
+    return data
+
+
+# Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/yaml.py
+def dump_yaml(filename: str, data: dict | object, sort_keys: bool = False) -> None:
     """Saves data into a YAML file safely.
 
     Note:
@@ -184,7 +205,28 @@ def dump_yaml(filename: str, data: dict | object, sort_keys: bool = False):
 
 # Adapted from
 # https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/pkl.py
-def dump_pickle(filename: str, data: Any):
+def load_pickle(filename: str) -> Any:
+    """Loads an input PKL file safely.
+
+    Args:
+        filename: The path to pickled file.
+
+    Raises:
+        FileNotFoundError: When the specified file does not exist.
+
+    Returns:
+        The data read from the input file.
+    """
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"File not found: {filename}")
+    with open(filename, "rb") as f:
+        data = pickle.load(f)
+    return data
+
+
+# Adapted from
+# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/pkl.py
+def dump_pickle(filename: str, data: Any) -> None:
     """Saves data into a pickle file safely.
 
     Note:
@@ -203,24 +245,3 @@ def dump_pickle(filename: str, data: Any):
     # save data
     with open(filename, "wb") as f:
         pickle.dump(data, f)
-
-
-# Adapted from
-# https://github.com/isaac-sim/IsaacLab/blob/main/source/extensions/omni.isaac.lab/omni/isaac/lab/utils/io/pkl.py
-def load_pickle(filename: str) -> Any:
-    """Loads an input PKL file safely.
-
-    Args:
-        filename: The path to pickled file.
-
-    Raises:
-        FileNotFoundError: When the specified file does not exist.
-
-    Returns:
-        The data read from the input file.
-    """
-    if not os.path.exists(filename):
-        raise FileNotFoundError(f"File not found: {filename}")
-    with open(filename, "rb") as f:
-        data = pickle.load(f)
-    return data

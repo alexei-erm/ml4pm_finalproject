@@ -13,10 +13,10 @@ class SlidingDataset(Dataset):
         transient: bool,
         window_size: int,
         device: torch.device,
-        features: list[str] | None = None,
+        features: list[str],
+        downsampling: int,
     ) -> None:
 
-        assert window_size >= 1
         self.window_size = window_size
         self.device = device
 
@@ -50,21 +50,8 @@ class SlidingDataset(Dataset):
         df.drop(columns=df.columns[injector_columns_mask], inplace=True)
         df["total_injector_opening"] = total_injector_opening
 
-        # Save filtered measurements DataFrame
-        self.df = df
-        self.index = df.index.values
-
-        # Compute subsequence indices according to window size
-        valid_end_indices = (
-            df.index.to_series()
-            .diff(periods=self.window_size - 1)
-            .eq((self.window_size - 1) * pd.Timedelta(seconds=30))
-        )
-        start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
-        self.start_indices = torch.from_numpy(start_indices)
-
-        # Convert to tensor
-        if features is not None:
+        # Select features
+        if len(features) > 0:
             columns = []
             for feature in features:
                 matching_columns = df.columns[df.columns.to_series().str.match(feature)].to_list()
@@ -72,11 +59,25 @@ class SlidingDataset(Dataset):
                     print(f"Selected feature '{feature}' does not match any feature in the dataset.")
                     exit()
                 columns += matching_columns
-            self.measurements = torch.from_numpy(df[columns].to_numpy(dtype=np.float32)).to(device)
-        else:
-            self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
+            df = df[columns]
 
-        # Normalize
+        # Downsample
+        if downsampling > 1:
+            df = downsample(df, period=downsampling * pd.Timedelta(seconds=30))
+
+        # Save filtered dataframe
+        self.df = df.copy()
+        self.index = df.index.values.copy()
+
+        # Compute subsequence indices according to window size
+        valid_end_indices = df.index.to_series().diff(periods=window_size - 1) == (
+            (window_size - 1) * downsampling * pd.Timedelta(seconds=30)
+        )
+        start_indices = np.nonzero(valid_end_indices)[0] - window_size + 1
+        self.start_indices = torch.from_numpy(start_indices)
+
+        # Convert to tensor and normalize
+        self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
         mean = self.measurements.mean(dim=0, keepdim=True)
         std = self.measurements.std(dim=0, keepdim=True)
         self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
@@ -96,6 +97,23 @@ class SlidingDataset(Dataset):
         )
 
 
+def downsample(df: pd.DataFrame, period: pd.Timedelta) -> pd.DataFrame:
+    """Downsamples a dataframe with timestamp index, handling gaps."""
+
+    # Identify large gaps
+    large_gaps = df.index.to_series().diff() > period
+    group = large_gaps.cumsum()
+
+    # Downsample each group separately
+    downsampled = []
+    for group_id, group_data in df.groupby(group):
+        downsampled_group = group_data.resample(period, closed="right", label="right").mean()
+        downsampled.append(downsampled_group)
+
+    # Combine all downsampled groups
+    return pd.concat(downsampled)
+
+
 def collate_fn(batch):
     x, label, index = zip(*batch)
     x = torch.stack(x)
@@ -109,8 +127,7 @@ def create_train_val_dataloaders(
 ) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
-    num_samples = len(dataset)
-    indices = np.arange(num_samples)
+    indices = np.arange(len(dataset))
     np.random.shuffle(indices)
     indices = indices[::subsampling]
     validation_size = int(validation_split * len(indices))

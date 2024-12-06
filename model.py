@@ -102,7 +102,7 @@ class ConvolutionalAE(nn.Module):
 
 
 class LSTMAE(nn.Module):
-    def __init__(self, input_channels: int, cfg: LSTMAEConfig) -> None:
+    def __init__(self, input_channels: int, window_size: int, cfg: LSTMAEConfig) -> None:
         super(LSTMAE, self).__init__()
 
         self.encoder_lstm = nn.LSTM(
