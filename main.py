@@ -53,25 +53,6 @@ def make_log_name(cfg: Config) -> str:
 
 
 def main(args: argparse.Namespace) -> None:
-    model = LSTMAE(
-        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.0, fc_hidden_sizes=[17, 32], latent_sigmoid=False)
-    )
-    print(model)
-    model = LSTMAE(
-        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.0, fc_hidden_sizes=[17, 32], latent_sigmoid=True)
-    )
-    print(model)
-    model = LSTMAE(
-        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.2, fc_hidden_sizes=[17, 32], latent_sigmoid=False)
-    )
-    print(model)
-    model = LSTMAE(
-        5, LSTMAEConfig(hidden_size=16, num_layers=2, dropout=0.2, fc_hidden_sizes=[17, 32], latent_sigmoid=True)
-    )
-    print(model)
-
-    exit()
-
     cfg = load_config(args)
 
     seed_all(cfg.seed)
@@ -113,6 +94,17 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
+    """
+    What's the best interface here?
+    --train <config> [<overrides>]
+        Read <config> from config.py, override args if necessary
+    --eval <config> [<overrides>]
+        Load <config> from saved YAML, <config> could also contain the run (timestamp) directory.
+        Override args from saved config if necessary.
+
+    Save config.yaml, and load model from model.pkl. Should be flexible enough and even allow for
+    small changes to the model definition if necessary.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
     parser.add_argument("--cpu", action="store_true", help="Use CPU for all Torch operations.")
