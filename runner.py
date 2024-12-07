@@ -106,9 +106,12 @@ class Runner:
 
             total_val_loss /= len(val_loader)
 
+            if epoch % 10 == 0 or epoch == self.cfg.epochs - 1:
+                torch.save(self.model.state_dict(), os.path.join(self.log_dir, "model.pt"))
+
             if total_val_loss < best_val_loss:
                 best_val_loss = total_val_loss
-                torch.save(self.model.state_dict(), os.path.join(self.log_dir, "model.pt"))
+                torch.save(self.model.state_dict(), os.path.join(self.log_dir, "best_model.pt"))
 
             writer.add_scalar("Loss/Training", total_loss, epoch + 1)
             writer.add_scalar("Loss/Training_reconstruction", total_reconstruction_loss, epoch + 1)
@@ -124,12 +127,12 @@ class Runner:
                 f"Val.={total_val_loss:.7f}"
             )
 
-    def test_autoencoder(self) -> None:
+    def test_autoencoder(self, load_best: bool) -> None:
         if self.cfg.unit == "VG4":
             print("Evaluation is not possible with VG4")
             return
 
-        model_path = os.path.join(self.log_dir, "model.pt")
+        model_path = os.path.join(self.log_dir, "best_model.pt" if load_best else "model.pt")
         self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
 
         self.model.eval()

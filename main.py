@@ -48,7 +48,7 @@ def main(args: argparse.Namespace) -> None:
         seed_all(cfg.seed)
 
         runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.test_autoencoder()
+        runner.test_autoencoder(load_best=args.best)
 
     elif args.spc:
         assert False, "SPC is currently broken"
@@ -81,6 +81,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--epochs", type=int, help="Number of epochs.")
     parser.add_argument("--subsampling", type=int, help="Subsampling for training samples.")
+    parser.add_argument(
+        "--best",
+        action="store_true",
+        help="Load the model with the lowest validation loss. By default, loads the last model saved while training.",
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--train", action="store_true", help="Train the model.")
     group.add_argument("--eval", action="store_true", help="Evaluate the model.")
