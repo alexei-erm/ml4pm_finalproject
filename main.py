@@ -66,7 +66,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], help="Generator operating mode."
     )
-    parser.add_argument("--transient", action="store_true", help="Include transient (non equilibrium) samples.")
+    parser.add_argument(
+        "--transient", action="store_true", default=None, help="Include transient (non equilibrium) samples."
+    )
     parser.add_argument(
         "--features", nargs="+", help="Feature(s) to use for model input. By default, uses all features."
     )

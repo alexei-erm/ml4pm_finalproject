@@ -10,14 +10,14 @@ model_cfg:
   dropout: 0.1
   latent_sigmoid: false
 features:
-- .*_tmp
+- .*tmp
 seed: 42
 unit: VG5
 operating_mode: turbine
 transient: false
 window_size: 1
 batch_size: 256
-epochs: 1
+epochs: 500
 learning_rate: 0.001
 kl_divergence_weight: 0.0
 kl_divergence_rho: 0.05

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, Any
+from typing import Any
 from enum import Enum
 
 
@@ -67,7 +67,7 @@ CFG: dict[str, Config] = {}
 CFG["OneSample"] = Config(
     model=ModelType.FullyConnectedAE,
     model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16], dropout=0.1, latent_sigmoid=False),
-    features=[".*_tmp"],
+    features=[],
     window_size=1,
     measurement_downsampling=16,
 )
@@ -77,17 +77,18 @@ CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.1)
 CFG["Conv"] = Config(
     model=ModelType.ConvolutionalAE,
     model_cfg=ConvolutionalAEConfig(
-        channels=[4, 8, 16],
-        hidden_sizes=[32, 8],
-        kernel_size=3,
+        channels=[4, 8, 16, 32],
+        hidden_sizes=[16],
+        kernel_size=7,
         max_pool_size=2,
-        dropout=0.1,
+        dropout=0.0,
         latent_sigmoid=False,
     ),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
-    measurement_downsampling=10,
+    measurement_downsampling=32,
 )
+
 
 CFG["LSTM"] = Config(
     model=ModelType.LSTMAE,
@@ -102,10 +103,10 @@ CFG["LSTMSparse"] = inherit(
 )
 CFG["LSTMSimple"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
-    features=["stat_coil_ph01_01_tmp", ".*"],
+    model_cfg=LSTMAEConfig(hidden_size=64, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
+    features=["stat_coil_ph01_01_tmp"],
     window_size=32,
-    measurement_downsampling=32,
+    measurement_downsampling=16,
 )
 
 
