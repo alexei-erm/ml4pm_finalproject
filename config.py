@@ -48,7 +48,7 @@ class Config:
     window_size: int = 256
     batch_size: int = 256
     epochs: int = 500
-    learning_rate: float = 1e-3
+    learning_rate: float = 1e-4
     kl_divergence_weight: float = 0.0
     kl_divergence_rho: float = 0.05
     l1_weight: float = 0.0
@@ -70,6 +70,7 @@ CFG["OneSample"] = Config(
     features=[],
     window_size=1,
     measurement_downsampling=16,
+    epochs=1000,
 )
 CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.1)
 
@@ -92,7 +93,7 @@ CFG["Conv"] = Config(
 
 CFG["LSTM"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=32, num_layers=1, dropout=0.2, fc_hidden_sizes=[32], latent_sigmoid=False),
+    model_cfg=LSTMAEConfig(hidden_size=32, num_layers=2, dropout=0.0, fc_hidden_sizes=[32], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
     measurement_downsampling=32,
@@ -103,10 +104,11 @@ CFG["LSTMSparse"] = inherit(
 )
 CFG["LSTMSimple"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=64, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
+    model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
-    measurement_downsampling=16,
+    measurement_downsampling=32,
+    epochs=1000,
 )
 
 
@@ -115,5 +117,5 @@ CFG["SPC"] = Config(
     model_cfg=None,
     features=[],
     window_size=1,
-    measurement_downsampling=1,
+    measurement_downsampling=16,
 )

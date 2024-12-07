@@ -8,6 +8,9 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import RocCurveDisplay
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA, KernelPCA, SparsePCA
+from sklearn.svm import OneClassSVM
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
@@ -152,8 +155,6 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
     train_loader = create_dataloader(training_dataset, batch_size=cfg.batch_size)
     train_latent = get_latent_features(model, train_loader)
 
-    from sklearn.svm import OneClassSVM
-
     ocsvm = OneClassSVM(nu=0.002)
     ocsvm.fit(train_latent.cpu().numpy())
 
@@ -219,13 +220,6 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
         t2s = torch.concatenate(t2s).cpu().numpy()
         svm = np.concatenate(svm)
 
-        # df = pd.DataFrame(xs.flatten(), index=indices.flatten())
-        # df.sort_index(inplace=True)
-        # df = df.iloc[: len(df) // 10, :]
-        # sns.lineplot(df)
-        # plt.show()
-        # exit()
-
         indices = indices[:, -1]
         labels = labels[:, -1]
         xs = xs[:, -1, 0]
@@ -277,12 +271,15 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
         downsampling=cfg.measurement_downsampling,
     )
 
-    x_healthy = training_dataset.measurements
-
-    mean, covariance, inv_covariance = get_statistics(x_healthy)
+    summer = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [6, 7])
+    winter = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [11, 12])
 
     fig, ax = plt.subplots()
-    for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+    fig2, axes = plt.subplots(2, 3)
+    axes = axes.flatten()
+
+    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+        print(f"Testing on synthetic anomalies {name}")
         dataset = SlidingDataset(
             parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
             operating_mode=cfg.operating_mode,
@@ -293,42 +290,48 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
             downsampling=cfg.measurement_downsampling,
         )
 
-        x_test = dataset.measurements
-        diff = x_test - mean
-        t2 = torch.einsum("ib,ij,jb->b", diff, inv_covariance, diff)
+        if name.startswith("01"):
+            x_healthy = training_dataset.measurements[summer, :]
+        else:
+            x_healthy = training_dataset.measurements[winter, :]
+
+        fit_kpca(x_healthy.cpu().numpy())
+        exit()
+
+        # pca = PCA(n_components=60)
+        pca = KernelPCA(n_components=None, kernel="rbf", gamma=0.1, eigen_solver="randomized", n_jobs=-1)
+        # pca = SparsePCA(n_components=30, alpha=1)
+        x_healthy_pca = pca.fit_transform(x_healthy.cpu().numpy())
+
+        eigenvalues = pca.eigenvalues_
+        cumulative_variance = np.cumsum(eigenvalues) / np.sum(eigenvalues)
+        n_components_optimal = np.searchsorted(cumulative_variance, 0.99) + 1
+        print(f"Optimal number of components: {n_components_optimal}")
+
+        x_test_pca = pca.transform(dataset.measurements.cpu().numpy())
+        print(x_healthy.shape, x_healthy_pca.shape)
+
+        ocsvm = OneClassSVM(kernel="rbf", nu=0.02)
+        # ocsvm.fit(x_healthy_pca)
+        # svm_pred = ocsvm.score_samples(x_test_pca)
+
+        mean, covariance, inv_covariance = get_statistics(torch.from_numpy(x_healthy_pca))
+        diff = torch.from_numpy(x_test_pca) - mean
+        # mean, covariance, inv_covariance = get_statistics(x_healthy)
+        # diff = dataset.measurements - mean
+        t2 = torch.einsum("bi,ij,bj->b", diff, inv_covariance, diff)
 
         labels = dataset.ground_truth.cpu().numpy()
-
-        window = 1
-        tpr = []
-        fpr = []
-        for threshold in np.linspace(t2.min().item(), t2.max().item(), 1000):
-            fault = t2 > threshold
-            windowed = fault.unfold(0, window, 1)
-            consecutive_above_threshold = windowed.sum(dim=-1) == window
-            pred = torch.zeros_like(fault)
-            pred[window - 1 :] = consecutive_above_threshold
-            pred = pred.cpu().numpy()
-
-            tp = np.sum((pred == 1) & (labels == 1))
-            fp = np.sum((pred == 1) & (labels == 0))
-            tn = np.sum((pred == 0) & (labels == 0))
-            fn = np.sum((pred == 0) & (labels == 1))
-            tpr.append(tp / (tp + fn) if (tp + fn) > 0 else 0)
-            fpr.append(fp / (fp + tn) if (fp + tn) > 0 else 0)
-
-        tpr = np.array(tpr)
-        fpr = np.array(fpr)
-        RocCurveDisplay(fpr=fpr, tpr=tpr).plot(name=name, ax=ax)
-        # t2 = t2.cpu().numpy()
-        # RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
-
         t2 = t2.cpu().numpy()
-        fig, ax2 = plt.subplots()
-        ax2.plot(labels)
-        t2 = t2.clip(max=t2.mean() + 3 * t2.std())
-        ax2.plot((t2 - t2.min()) / (t2.max() - t2.min()))
-        ax2.set_title(name)
+        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
+
+        axes[i].plot(labels, label="label")
+        t2 = t2.clip(max=4 * t2.mean())
+        t2 = (t2 - t2.min()) / (t2.max() - t2.min())
+        axes[i].plot(t2, label="T2")
+        # svm_pred = (svm_pred - svm_pred.min()) / (svm_pred.max() - svm_pred.min())
+        # axes[i].plot(svm_pred - 2, label="SVM")
+        axes[i].set_title(name)
 
     ax.plot([0, 1], [0, 1], color="k", linestyle="--")
     plt.legend()
@@ -353,7 +356,7 @@ def get_statistics(input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, tor
 
     mean = input.mean(dim=0, keepdim=True)
     centered = input - mean
-    covariance = (centered.T @ centered) / (input.shape[0] - 1)
+    covariance = (centered.T @ centered) / input.shape[0]
     inv_covariance = torch.linalg.inv(covariance)
     return mean.squeeze(), covariance, inv_covariance
 
@@ -364,3 +367,56 @@ def kl_divergence(latent: torch.Tensor, rho: float) -> torch.Tensor:
     rho_hat = torch.mean(latent, dim=0)
     kl = rho * torch.log(rho / rho_hat) + (1 - rho) * torch.log((1 - rho) / (1 - rho_hat))
     return torch.sum(kl)
+
+
+def fit_kpca(input: np.ndarray) -> KernelPCA:
+
+    data_train, data_val = train_test_split(input, test_size=0.2)
+
+    fig, ax = plt.subplots()
+
+    gamma_values = 1.0 / input.shape[1] * np.logspace(-1, 1, num=7)
+    for gamma in gamma_values:
+        kpca = KernelPCA(
+            n_components=None,
+            kernel="rbf",
+            gamma=gamma,
+            fit_inverse_transform=True,
+            eigen_solver="randomized",
+            n_jobs=-1,
+        )
+        kpca.fit(data_train)
+
+        cumulative_variance = np.cumsum(kpca.eigenvalues_) / np.sum(kpca.eigenvalues_)
+        hyperdimension = np.searchsorted(cumulative_variance, 0.99) + 1
+
+        # Cross-validate to find optimal number of components
+        errors = []
+        n_components = np.linspace(start=1, stop=hyperdimension, num=20, endpoint=True, dtype=int)
+        for n in tqdm(n_components):
+            kpca = KernelPCA(
+                n_components=n,
+                kernel="rbf",
+                gamma=gamma,
+                fit_inverse_transform=True,
+                eigen_solver="randomized",
+                n_jobs=-1,
+            )
+            kpca.fit(data_train)
+
+            data_val_transformed = kpca.transform(data_val)
+            data_val_reconstructed = kpca.inverse_transform(data_val_transformed)
+
+            error = np.mean(np.square(data_val_reconstructed - data_val))
+            errors.append(error)
+
+        ax.plot(
+            n_components / hyperdimension, errors, marker="o", label=f"gamma={gamma}, hyperdimension={hyperdimension}"
+        )
+
+    ax.set_xlabel("Number of principal components")
+    ax.set_ylabel("MSRE")
+    ax.legend()
+    plt.show()
+
+    exit()
