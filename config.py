@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Config:
+    sampling_rate: int | None = None
     model: str = "NONAME"
     seed: int = 42
     unit: str = "VG5"

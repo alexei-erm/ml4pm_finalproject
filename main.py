@@ -53,7 +53,9 @@ def make_log_name(cfg: Config) -> str:
 
 
 def main(args: argparse.Namespace) -> None:
+    print(f"Args received: {args}")
     cfg = load_config(args)
+    print(f"Config loaded: {cfg.__dict__}")
 
     seed_all(cfg.seed)
 
@@ -70,7 +72,7 @@ def main(args: argparse.Namespace) -> None:
     else:
         device = select_device()
     print(f"Device: {device}")
-    
+
     if args.train:
         log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
         print(f"Saving model and logs to: {log_dir}")
@@ -98,6 +100,7 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--sampling_rate", type=int, help="Sample every nth point from dataset. None means no sampling.")
     parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
     parser.add_argument("--cpu", action="store_true", help="Evaluate the model.")
     parser.add_argument(

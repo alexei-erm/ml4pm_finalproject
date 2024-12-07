@@ -22,14 +22,16 @@ class SlidingDataset(Dataset):
 
         # Load file
         df = pd.read_parquet(parquet_file)
+        print(f"Time deltas between samples: {df.index.to_series().diff().unique()}")
 
         # Apply sampling if rate is specified
+        print(sampling_rate)
+        time_delta = pd.Timedelta(seconds=30)
         if sampling_rate is not None:
+            before_len = len(df)
             offset = sampling_rate // 2
-            df = df.iloc[offset::sampling_rate]
-            time_delta = pd.Timedelta(seconds=30 * sampling_rate)
-        else:
-            time_delta = pd.Timedelta(seconds=30)
+            df = df.iloc[offset::sampling_rate].copy()
+            print(f"Length before: {before_len}, after: {len(df)}")
 
         # Filter operating mode
         if equilibrium:
@@ -63,13 +65,19 @@ class SlidingDataset(Dataset):
         self.index = df.index.values
 
         # Compute subsequence indices according to window size
-        valid_end_indices = (
-            df.index.to_series()
-            .diff(periods=self.window_size - 1)
-            .eq((self.window_size - 1) * time_delta)
-        )
-        start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
+        # Replace the current window validation code with:
+        print("Time delta being used:", time_delta)
+        chunks = []
+        for i in range(0, len(df) - window_size + 1):
+            chunk = df.index[i:i + window_size]
+            if (chunk[-1] - chunk[0]) == time_delta * (window_size - 1):
+                chunks.append(i)
+
+        start_indices = np.array(chunks)
         self.start_indices = torch.from_numpy(start_indices)
+        print(f"Number of valid windows found: {len(start_indices)}")
+        print("First few time differences:", df.index.to_series().diff(periods=self.window_size - 1)[:5])
+        print("Expected time delta:", (self.window_size - 1) * time_delta)
 
         # Convert to tensor
         if features is not None:

@@ -30,7 +30,9 @@ class Runner:
             window_size=cfg.window_size,
             device=device,
             features=cfg.features,
+            sampling_rate=cfg.sampling_rate  
         )
+        print(f"Creating dataset with sampling_rate={cfg.sampling_rate}")
 
         model_type = eval(cfg.model)
         self.model = model_type(input_channels=self.training_dataset.measurements.shape[0], cfg=cfg).to(device)
