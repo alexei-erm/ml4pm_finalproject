@@ -29,7 +29,7 @@ def train_autoencoder(cfg: Config, dataset_root: str, log_dir: str, device: torc
 
     model_type = eval(cfg.model.value)
     model = model_type(
-        input_channels=training_dataset.measurements.shape[0], window_size=cfg.window_size, cfg=cfg.model_cfg
+        input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
     ).to(device)
 
     dump_yaml(os.path.join(log_dir, "config.yaml"), cfg)
@@ -141,7 +141,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
 
     model_type = eval(cfg.model.value)
     model = model_type(
-        input_channels=training_dataset.measurements.shape[0], window_size=cfg.window_size, cfg=cfg.model_cfg
+        input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
     ).to(device)
 
     model_state_path = os.path.join(log_dir, "best_model.pt" if load_best else "model.pt")
@@ -152,15 +152,12 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
     train_loader = create_dataloader(training_dataset, batch_size=cfg.batch_size)
     train_latent = get_latent_features(model, train_loader)
 
-    # from sklearn.svm import OneClassSVM
+    from sklearn.svm import OneClassSVM
 
-    # ocsvm = OneClassSVM(nu=0.002)
-    # ocsvm.fit(train_latent.T.cpu().numpy())
+    ocsvm = OneClassSVM(nu=0.002)
+    ocsvm.fit(train_latent.cpu().numpy())
 
-    latent_mean, latent_covariance = get_latent_statistics(train_latent)
-    inv_latent_covariance = torch.linalg.inv(
-        latent_covariance + 1e-7 * torch.eye(latent_covariance.shape[0], device=device)
-    )
+    latent_mean, latent_covariance, inv_latent_covariance = get_statistics(train_latent)
 
     figs = []
     axes = []
@@ -196,7 +193,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
 
         with torch.no_grad():
             for x, y, index in tqdm(loader):
-                x[(y == 1).unsqueeze(1).repeat(1, x.shape[1], 1)] += 0.5
+                x[y == 1] += 0.5
 
                 xs.append(x)
                 labels.append(y)
@@ -212,7 +209,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
                 t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
                 t2s.append(t2)
 
-                # svm.append(ocsvm.predict(latent.cpu().numpy()))
+                svm.append(ocsvm.predict(latent.cpu().numpy()))
 
         xs = torch.concatenate(xs).cpu().numpy()
         preds = torch.concatenate(preds).cpu().numpy()
@@ -220,7 +217,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
         labels = torch.concatenate(labels).cpu().numpy()
         spes = torch.concatenate(spes).cpu().numpy()
         t2s = torch.concatenate(t2s).cpu().numpy()
-        # svm = np.concatenate(svm)
+        svm = np.concatenate(svm)
 
         # df = pd.DataFrame(xs.flatten(), index=indices.flatten())
         # df.sort_index(inplace=True)
@@ -229,10 +226,10 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
         # plt.show()
         # exit()
 
-        indices = indices[..., -1]
-        labels = labels[..., -1]
-        xs = xs[..., 0, -1]
-        preds = preds[..., 0, -1]
+        indices = indices[:, -1]
+        labels = labels[:, -1]
+        xs = xs[:, -1, 0]
+        preds = preds[:, -1, 0]
 
         # spes = spes.clip(max=spes.mean() + 3.0 * spes.std())
         # t2s = t2s.clip(max=t2s.mean() + 3.0 * t2s.std())
@@ -251,8 +248,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
         ax.plot(preds, label="pred")
         ax.plot(spes, label="SPE")
         ax.plot(t2s, label="T2")
-        # ax.plot(svm, label="OCSVM")
-        # ax.step(indices, labels, label="label")
+        ax.plot(svm, label="OCSVM")
 
         for start, end in zip(
             np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]
@@ -283,12 +279,7 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
 
     x_healthy = training_dataset.measurements
 
-    mean = x_healthy.mean(dim=1, keepdim=True)
-    centered = x_healthy - mean
-    num_samples = x_healthy.shape[1]
-    covariance = (centered @ centered.T) / (num_samples - 1)
-
-    inv_covariance = torch.linalg.inv(covariance)
+    mean, covariance, inv_covariance = get_statistics(x_healthy)
 
     fig, ax = plt.subplots()
     for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
@@ -335,7 +326,7 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
         t2 = t2.cpu().numpy()
         fig, ax2 = plt.subplots()
         ax2.plot(labels)
-        t2 = t2.clip(max=t2.mean() + 4 * t2.std())
+        t2 = t2.clip(max=t2.mean() + 3 * t2.std())
         ax2.plot((t2 - t2.min()) / (t2.max() - t2.min()))
         ax2.set_title(name)
 
@@ -345,31 +336,30 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
 
 
 def get_latent_features(model: nn.Module, dataloader: DataLoader) -> torch.Tensor:
+    """Returns a tensor of shape (n_samples, n_features) of all the latent features for the given model and data."""
+
     model.eval()
-
     all_latent = []
-
     with torch.no_grad():
         for x, _, _ in tqdm(dataloader):
             _, latent = model(x)
             all_latent.append(latent)
 
-    return torch.concatenate(all_latent).T
+    return torch.concatenate(all_latent)
 
 
-def get_latent_statistics(latent: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Returns the mean and covariance of the latent features."""
+def get_statistics(input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Returns the mean, covariance and inverse covariance of the input tensor, of shape (n_samples, n_features)."""
 
-    mean = latent.mean(dim=1, keepdim=True)
-    centered = latent - mean
-    num_samples = latent.shape[1]
-    covariance = (centered @ centered.T) / (num_samples - 1)
-
-    return mean.squeeze(), covariance
+    mean = input.mean(dim=0, keepdim=True)
+    centered = input - mean
+    covariance = (centered.T @ centered) / (input.shape[0] - 1)
+    inv_covariance = torch.linalg.inv(covariance)
+    return mean.squeeze(), covariance, inv_covariance
 
 
 def kl_divergence(latent: torch.Tensor, rho: float) -> torch.Tensor:
-    """Computes the KL-divergence of the batch. Input shape (batch_size, n_features)."""
+    """Computes the KL-divergence of the batch. Input shape (n_samples, n_features)."""
 
     rho_hat = torch.mean(latent, dim=0)
     kl = rho * torch.log(rho / rho_hat) + (1 - rho) * torch.log((1 - rho) / (1 - rho_hat))

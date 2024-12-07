@@ -34,8 +34,8 @@ class FullyConnectedAE(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        latent = self.encoder(x.squeeze(-1))
-        output = self.decoder(latent).unsqueeze(-1)
+        latent = self.encoder(x.flatten(start_dim=1))
+        output = self.decoder(latent).reshape(x.shape)
         return output, latent
 
 
@@ -96,9 +96,10 @@ class ConvolutionalAE(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = x.permute(0, 2, 1)
         latent = self.encoder(x)
         output = self.decoder(latent)
-        return output, latent
+        return output.permute(0, 2, 1), latent
 
 
 class LSTMAE(nn.Module):
@@ -143,8 +144,6 @@ class LSTMAE(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = x.permute(0, 2, 1)
-
         _, (hidden, _) = self.encoder_lstm(x)
         latent = self.encoder_fc(hidden[-1, ...]) if self.encoder_fc is not None else hidden[-1, ...]
 
@@ -152,4 +151,4 @@ class LSTMAE(nn.Module):
         decoder_input = decoder_input.unsqueeze(1).repeat(1, x.shape[1], 1)
         reconstruction, _ = self.decoder_lstm(decoder_input)
         reconstruction = self.decoder_out_fc(reconstruction)
-        return reconstruction.permute(0, 2, 1), latent
+        return reconstruction, latent

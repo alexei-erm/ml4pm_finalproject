@@ -81,7 +81,6 @@ class SlidingDataset(Dataset):
         mean = self.measurements.mean(dim=0, keepdim=True)
         std = self.measurements.std(dim=0, keepdim=True)
         self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
-        self.measurements = self.measurements.T
 
     def __len__(self) -> int:
         return len(self.start_indices)
@@ -91,7 +90,7 @@ class SlidingDataset(Dataset):
         end_index = start_index + self.window_size
         ground_truth = self.ground_truth[start_index:end_index] if hasattr(self, "ground_truth") else None
         return (
-            self.measurements[:, start_index:end_index],
+            self.measurements[start_index:end_index, :],
             ground_truth,
             self.index[start_index:end_index],
         )

@@ -103,7 +103,7 @@ CFG["LSTMSparse"] = inherit(
 CFG["LSTMSimple"] = Config(
     model=ModelType.LSTMAE,
     model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
-    features=["stat_coil_ph01_01_tmp"],
+    features=["stat_coil_ph01_01_tmp", ".*"],
     window_size=32,
     measurement_downsampling=32,
 )
