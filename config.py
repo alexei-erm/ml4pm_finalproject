@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal, Any
+from enum import Enum
 
 
 @dataclass
@@ -28,10 +29,17 @@ class LSTMAEConfig:
     latent_sigmoid: bool
 
 
+class ModelType(Enum):
+    FullyConnectedAE = "FullyConnectedAE"
+    ConvolutionalAE = "ConvolutionalAE"
+    LSTMAE = "LSTMAE"
+    SPC = "SPC"
+
+
 @dataclass
 class Config:
-    model: Literal["FullyConnectedAE", "ConvolutionalAE", "LSTMAE"]
-    model_cfg: FullyConnectedAEConfig | ConvolutionalAEConfig | LSTMAEConfig
+    model: ModelType
+    model_cfg: FullyConnectedAEConfig | ConvolutionalAEConfig | LSTMAEConfig | None
     features: list[str]
     seed: int = 42
     unit: str = "VG5"
@@ -57,16 +65,17 @@ def inherit(base_config: Any, **overrides: Any) -> Any:
 CFG: dict[str, Config] = {}
 
 CFG["OneSample"] = Config(
-    model="FullyConnectedAE",
-    model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16], dropout=0.2, latent_sigmoid=False),
+    model=ModelType.FullyConnectedAE,
+    model_cfg=FullyConnectedAEConfig(hidden_sizes=[64, 32, 16], dropout=0.1, latent_sigmoid=False),
     features=[".*_tmp"],
     window_size=1,
     measurement_downsampling=16,
 )
-CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=1.0)
+CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.1)
+
 
 CFG["Conv"] = Config(
-    model="ConvolutionalAE",
+    model=ModelType.ConvolutionalAE,
     model_cfg=ConvolutionalAEConfig(
         channels=[4, 8, 16],
         hidden_sizes=[32, 8],
@@ -81,7 +90,7 @@ CFG["Conv"] = Config(
 )
 
 CFG["LSTM"] = Config(
-    model="LSTMAE",
+    model=ModelType.LSTMAE,
     model_cfg=LSTMAEConfig(hidden_size=32, num_layers=1, dropout=0.2, fc_hidden_sizes=[32], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
@@ -89,5 +98,21 @@ CFG["LSTM"] = Config(
 )
 CFG["LSTMSparse"] = inherit(
     CFG["LSTM"],
-    l1_weight=1.0,
+    l1_weight=2.0,
+)
+CFG["LSTMSimple"] = Config(
+    model=ModelType.LSTMAE,
+    model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
+    features=["stat_coil_ph01_01_tmp"],
+    window_size=32,
+    measurement_downsampling=32,
+)
+
+
+CFG["SPC"] = Config(
+    model=ModelType.SPC,
+    model_cfg=None,
+    features=[],
+    window_size=1,
+    measurement_downsampling=1,
 )

@@ -37,18 +37,22 @@ class SlidingDataset(Dataset):
             "all",
         ]
         df.drop(columns=operating_mode_vars, inplace=True)
-        assert (df.dtypes == float).all()
-
-        # If the dataset contains labels, separate them from the measurement data
-        if "ground_truth" in df.columns:
-            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy()).to(device)
-            df.drop(columns="ground_truth", inplace=True)
 
         # Aggregate injector openings
         injector_columns_mask = df.columns.to_series().str.match("injector_0[1-9]_opening")
         total_injector_opening = df.loc[:, injector_columns_mask].sum(axis=1)
         df.drop(columns=df.columns[injector_columns_mask], inplace=True)
         df["total_injector_opening"] = total_injector_opening
+
+        # Downsample
+        if downsampling > 1:
+            df = downsample(df, period=downsampling * pd.Timedelta(seconds=30))
+
+        # If the dataset contains labels, separate them from the measurement data
+        if "ground_truth" in df.columns:
+            df.loc[df["ground_truth"] > 0, "ground_truth"] = 1
+            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy()).to(device)
+            df.drop(columns="ground_truth", inplace=True)
 
         # Select features
         if len(features) > 0:
@@ -60,10 +64,6 @@ class SlidingDataset(Dataset):
                     exit()
                 columns += matching_columns
             df = df[columns]
-
-        # Downsample
-        if downsampling > 1:
-            df = downsample(df, period=downsampling * pd.Timedelta(seconds=30))
 
         # Save filtered dataframe
         self.df = df.copy()

@@ -1,4 +1,4 @@
-from runner import Runner
+from train import *
 from utils import *
 from model import *
 from config import *
@@ -23,7 +23,12 @@ def main(args: argparse.Namespace) -> None:
 
     log_root_dir = os.path.abspath(os.path.join("logs", args.config))
 
-    if args.train:
+    if CFG[args.config].model == ModelType.SPC:
+        cfg = CFG[args.config]
+        seed_all(cfg.seed)
+        fit_spc(cfg, dataset_root=args.dataset_root, device=device)
+
+    elif args.train:
         run_name = args.run_name if args.run_name is not None else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_dir = os.path.join(log_root_dir, run_name)
         print(f"Saving model and logs to: {log_dir}")
@@ -32,9 +37,7 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-
-        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.train_autoencoder()
+        train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
 
     elif args.eval:
         run_name = args.run_name if args.run_name is not None else sorted(os.listdir(log_root_dir))[-1]
@@ -46,16 +49,7 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-
-        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.test_autoencoder(load_best=args.best)
-
-    elif args.spc:
-        assert False, "SPC is currently broken"
-        log_dir = os.path.join(log_root_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-        seed_all(cfg.seed)
-        runner = Runner(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
-        runner.fit_spc()
+        test_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device)
 
 
 if __name__ == "__main__":
@@ -86,10 +80,9 @@ if __name__ == "__main__":
         action="store_true",
         help="Load the model with the lowest validation loss. By default, loads the last model saved while training.",
     )
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--train", action="store_true", help="Train the model.")
     group.add_argument("--eval", action="store_true", help="Evaluate the model.")
-    group.add_argument("--spc", action="store_true", help="Fit simple SPC model.")
     args = parser.parse_args()
 
     main(args)
