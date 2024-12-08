@@ -373,9 +373,13 @@ def fit_kpca(input: np.ndarray) -> KernelPCA:
 
     data_train, data_val = train_test_split(input, test_size=0.2)
 
-    fig, ax = plt.subplots()
+    num_gamma = 3
+    gamma_values = 1.0 / input.shape[1] * np.logspace(-1, 1, num=num_gamma)
+    errors_gamma = []
+    components = []
+    errors_components = []
+    elbows = []
 
-    gamma_values = 1.0 / input.shape[1] * np.logspace(-1, 1, num=7)
     for gamma in gamma_values:
         kpca = KernelPCA(
             n_components=None,
@@ -392,7 +396,7 @@ def fit_kpca(input: np.ndarray) -> KernelPCA:
 
         # Cross-validate to find optimal number of components
         errors = []
-        n_components = np.linspace(start=1, stop=hyperdimension, num=20, endpoint=True, dtype=int)
+        n_components = np.linspace(start=1, stop=hyperdimension, num=3, endpoint=True, dtype=int)
         for n in tqdm(n_components):
             kpca = KernelPCA(
                 n_components=n,
@@ -410,13 +414,50 @@ def fit_kpca(input: np.ndarray) -> KernelPCA:
             error = np.mean(np.square(data_val_reconstructed - data_val))
             errors.append(error)
 
-        ax.plot(
-            n_components / hyperdimension, errors, marker="o", label=f"gamma={gamma}, hyperdimension={hyperdimension}"
-        )
+        errors = np.asarray(errors)
 
-    ax.set_xlabel("Number of principal components")
-    ax.set_ylabel("MSRE")
-    ax.legend()
+        elbow_index = kneedle(n_components, errors)
+
+        errors_gamma.append(errors[elbow_index])
+        components.append(n_components)
+        errors_components.append(errors)
+        elbows.append(elbow_index)
+
+    best_gamma_index = np.argmin(errors_gamma)
+
+    fig, ax = plt.subplots(1, 2)
+    # FIXME: logarithmic x-axis
+    ax[0].plot(
+        gamma_values,
+        errors_gamma,
+        marker="o",
+    )
+    ax[0].set_xlabel("Gamma")
+    ax[0].set_ylabel("MSRE")
+    ax[0].set_title("Error vs gamma")
+
+    ax[1].plot(
+        components[best_gamma_index],
+        errors_components[best_gamma_index],
+        marker="o",
+    )
+    ax[1].axvline(x=components[best_gamma_index][elbows[best_gamma_index]], linestyle="--", color="k")
+    ax[1].set_xlabel("Number of principal components")
+    ax[1].set_ylabel("MSRE")
+    ax[1].set_title(f"Error vs number of components for optimal gamma = {gamma_values[best_gamma_index]:.4f}")
     plt.show()
 
     exit()
+
+
+def kneedle(x: np.ndarray, y: np.ndarray) -> int:
+    # If the values are decreasing, flip them
+    if y[-1] < y[0]:
+        y = -y
+
+    # Normalize
+    x_norm = (x - x.min()) / (x.max() - x.min())
+    y_norm = (y - y.min()) / (y.max() - y.min())
+
+    # Find the index of the point furthest from the diagonal (elbow point)
+    return np.argmax(y_norm - x_norm)
