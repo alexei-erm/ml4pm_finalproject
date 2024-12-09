@@ -51,7 +51,7 @@ class SlidingDataset(Dataset):
         # If the dataset contains labels, separate them from the measurement data
         if "ground_truth" in df.columns:
             df.loc[df["ground_truth"] > 0, "ground_truth"] = 1
-            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy()).to(device)
+            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy(dtype=bool)).to(device)
             df.drop(columns="ground_truth", inplace=True)
 
         # Select features

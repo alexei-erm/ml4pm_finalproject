@@ -274,11 +274,28 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
     summer = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [6, 7])
     winter = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [11, 12])
 
+    x_healthy_summer = training_dataset.measurements[summer, :]
+    x_healthy_winter = training_dataset.measurements[winter, :]
+
+    # gamma, n_components = optimize_kpca(x_healthy_summer.cpu().numpy())
+    gamma = 0.0235
+    n_components = 43
+
+    kpca = KernelPCA(
+        n_components=n_components,
+        kernel="rbf",
+        gamma=gamma,
+        fit_inverse_transform=True,
+        eigen_solver="randomized",
+        n_jobs=-1,
+    )
+    x_healthy_pca = kpca.fit_transform(x_healthy_summer.cpu().numpy())
+
     fig, ax = plt.subplots()
     fig2, axes = plt.subplots(2, 3)
     axes = axes.flatten()
 
-    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c"]):  # , "02_type_a", "02_type_b", "02_type_c"]):
         print(f"Testing on synthetic anomalies {name}")
         dataset = SlidingDataset(
             parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
@@ -289,29 +306,17 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
             device=device,
             downsampling=cfg.measurement_downsampling,
         )
+        dataset.measurements = x_healthy_winter
+        dataset.ground_truth = torch.zeros(dataset.measurements.shape[0], dtype=torch.bool, device=device)
+        dataset.ground_truth[1000:2000] = 1
+        dataset.measurements[dataset.ground_truth, :] += 0.5
 
-        if name.startswith("01"):
-            x_healthy = training_dataset.measurements[summer, :]
-        else:
-            x_healthy = training_dataset.measurements[winter, :]
+        # TODO: normalize test data using statistics from training set
 
-        fit_kpca(x_healthy.cpu().numpy())
-        exit()
+        x_test = dataset.measurements.cpu().numpy()
+        x_test_pca = kpca.transform(x_test)
 
-        # pca = PCA(n_components=60)
-        pca = KernelPCA(n_components=None, kernel="rbf", gamma=0.1, eigen_solver="randomized", n_jobs=-1)
-        # pca = SparsePCA(n_components=30, alpha=1)
-        x_healthy_pca = pca.fit_transform(x_healthy.cpu().numpy())
-
-        eigenvalues = pca.eigenvalues_
-        cumulative_variance = np.cumsum(eigenvalues) / np.sum(eigenvalues)
-        n_components_optimal = np.searchsorted(cumulative_variance, 0.99) + 1
-        print(f"Optimal number of components: {n_components_optimal}")
-
-        x_test_pca = pca.transform(dataset.measurements.cpu().numpy())
-        print(x_healthy.shape, x_healthy_pca.shape)
-
-        ocsvm = OneClassSVM(kernel="rbf", nu=0.02)
+        # ocsvm = OneClassSVM(kernel="rbf", nu=0.02)
         # ocsvm.fit(x_healthy_pca)
         # svm_pred = ocsvm.score_samples(x_test_pca)
 
@@ -321,6 +326,9 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
         # diff = dataset.measurements - mean
         t2 = torch.einsum("bi,ij,bj->b", diff, inv_covariance, diff)
 
+        x_test_reconstructed = kpca.inverse_transform(x_test_pca)
+        msre = np.mean(np.square(x_test_reconstructed - x_test), axis=1)
+
         labels = dataset.ground_truth.cpu().numpy()
         t2 = t2.cpu().numpy()
         RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
@@ -328,9 +336,14 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
         axes[i].plot(labels, label="label")
         t2 = t2.clip(max=4 * t2.mean())
         t2 = (t2 - t2.min()) / (t2.max() - t2.min())
+        msre = (msre - msre.min()) / (msre.max() - msre.min())
         axes[i].plot(t2, label="T2")
+        axes[i].plot(msre, label="MSRE")
+        # axes[i].plot(x_test[:, 0], label="x")
+        # axes[i].plot(x_test_reconstructed[:, 0], label="Rec")
         # svm_pred = (svm_pred - svm_pred.min()) / (svm_pred.max() - svm_pred.min())
         # axes[i].plot(svm_pred - 2, label="SVM")
+        axes[i].legend()
         axes[i].set_title(name)
 
     ax.plot([0, 1], [0, 1], color="k", linestyle="--")
@@ -352,7 +365,8 @@ def get_latent_features(model: nn.Module, dataloader: DataLoader) -> torch.Tenso
 
 
 def get_statistics(input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns the mean, covariance and inverse covariance of the input tensor, of shape (n_samples, n_features)."""
+    """Returns the mean, covariance and inverse covariance of the input tensor.
+    Input shape: (n_samples, n_features)"""
 
     mean = input.mean(dim=0, keepdim=True)
     centered = input - mean
@@ -369,12 +383,12 @@ def kl_divergence(latent: torch.Tensor, rho: float) -> torch.Tensor:
     return torch.sum(kl)
 
 
-def fit_kpca(input: np.ndarray) -> KernelPCA:
+def optimize_kpca(input: np.ndarray) -> tuple[float, int]:
 
     data_train, data_val = train_test_split(input, test_size=0.2)
 
-    num_gamma = 3
-    gamma_values = 1.0 / input.shape[1] * np.logspace(-1, 1, num=num_gamma)
+    num_gamma = 11
+    gamma_values = 1.0 / input.shape[1] * np.logspace(-1.5, 1.5, num=num_gamma)
     errors_gamma = []
     components = []
     errors_components = []
@@ -396,7 +410,7 @@ def fit_kpca(input: np.ndarray) -> KernelPCA:
 
         # Cross-validate to find optimal number of components
         errors = []
-        n_components = np.linspace(start=1, stop=hyperdimension, num=3, endpoint=True, dtype=int)
+        n_components = np.linspace(start=1, stop=hyperdimension, num=100, endpoint=True, dtype=int)
         for n in tqdm(n_components):
             kpca = KernelPCA(
                 n_components=n,
@@ -425,29 +439,28 @@ def fit_kpca(input: np.ndarray) -> KernelPCA:
 
     best_gamma_index = np.argmin(errors_gamma)
 
+    best_gamma = gamma_values[best_gamma_index]
+    best_components = components[best_gamma_index][elbows[best_gamma_index]]
+
     fig, ax = plt.subplots(1, 2)
-    # FIXME: logarithmic x-axis
     ax[0].plot(
         gamma_values,
         errors_gamma,
         marker="o",
     )
     ax[0].set_xlabel("Gamma")
+    ax[0].set_xscale("log")
     ax[0].set_ylabel("MSRE")
     ax[0].set_title("Error vs gamma")
-
-    ax[1].plot(
-        components[best_gamma_index],
-        errors_components[best_gamma_index],
-        marker="o",
-    )
-    ax[1].axvline(x=components[best_gamma_index][elbows[best_gamma_index]], linestyle="--", color="k")
+    ax[1].plot(components[best_gamma_index], errors_components[best_gamma_index], marker="o", label="MSRE")
+    ax[1].axvline(x=best_components, linestyle="--", color="k", label=f"{best_components} components")
     ax[1].set_xlabel("Number of principal components")
     ax[1].set_ylabel("MSRE")
-    ax[1].set_title(f"Error vs number of components for optimal gamma = {gamma_values[best_gamma_index]:.4f}")
+    ax[1].set_title(f"Error vs number of components for optimal gamma = {best_gamma:.4f}")
+    ax[1].legend()
     plt.show()
 
-    exit()
+    return best_gamma, best_components
 
 
 def kneedle(x: np.ndarray, y: np.ndarray) -> int:
