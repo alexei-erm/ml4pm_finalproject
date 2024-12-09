@@ -28,6 +28,11 @@ def main(args: argparse.Namespace) -> None:
         seed_all(cfg.seed)
         fit_spc(cfg, dataset_root=args.dataset_root, device=device)
 
+    elif CFG[args.config].model == ModelType.KPCA:
+        cfg = CFG[args.config]
+        seed_all(cfg.seed)
+        fit_kpca(cfg, dataset_root=args.dataset_root, device=device)
+
     elif args.train:
         run_name = args.run_name if args.run_name is not None else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_dir = os.path.join(log_root_dir, run_name)

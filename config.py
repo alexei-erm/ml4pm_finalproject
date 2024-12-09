@@ -34,6 +34,7 @@ class ModelType(Enum):
     ConvolutionalAE = "ConvolutionalAE"
     LSTMAE = "LSTMAE"
     SPC = "SPC"
+    KPCA = "KPCA"
 
 
 @dataclass
@@ -117,5 +118,12 @@ CFG["SPC"] = Config(
     model_cfg=None,
     features=[],
     window_size=1,
-    measurement_downsampling=16,
+    measurement_downsampling=32,
+)
+CFG["KPCA"] = Config(
+    model=ModelType.KPCA,
+    model_cfg=None,
+    features=[],
+    window_size=1,
+    measurement_downsampling=32,
 )

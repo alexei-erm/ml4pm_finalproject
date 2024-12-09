@@ -178,6 +178,8 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
             features=cfg.features,
             device=device,
             downsampling=cfg.measurement_downsampling,
+            mean=training_dataset.mean,
+            std=training_dataset.std,
         )
         if len(dataset) == 0:
             continue
@@ -274,12 +276,87 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
     summer = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [6, 7])
     winter = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [11, 12])
 
+    x_healthy_summer = training_dataset.measurements[summer, :].cpu().numpy()
+    x_healthy_winter = training_dataset.measurements[winter, :].cpu().numpy()
+
+    fig, axes = plt.subplots(1, 2)
+    fig2, axes2 = plt.subplots(2, 3)
+    axes2 = axes2.flatten()
+
+    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+        print(f"Testing on synthetic anomalies {name}")
+        dataset = SlidingDataset(
+            parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
+            operating_mode=cfg.operating_mode,
+            transient=cfg.transient,
+            window_size=cfg.window_size,
+            features=cfg.features,
+            downsampling=cfg.measurement_downsampling,
+            device=device,
+            mean=training_dataset.mean,
+            std=training_dataset.std,
+        )
+
+        x_healthy = x_healthy_summer if name.startswith("01") else x_healthy_winter
+
+        # dataset.measurements = torch.clone(torch.from_numpy(x_healthy))
+        dataset.ground_truth = torch.zeros(dataset.measurements.shape[0], dtype=torch.bool, device=device)
+        dataset.ground_truth[dataset.ground_truth.shape[0] // 3 : dataset.ground_truth.shape[0] // 3 * 2] = 1
+        anomalous_cols = torch.from_numpy(dataset.df.columns.to_series().str.match("stat_.*").to_numpy())
+        print(dataset.df.columns[anomalous_cols])
+        anomalies = np.where(anomalous_cols, 5.0 / dataset.std, 0)
+        dataset.measurements[dataset.ground_truth, :] += anomalies
+
+        x_test = dataset.measurements.cpu().numpy()
+
+        t2 = hotelling_t2(train=x_healthy, test=x_test)
+
+        labels = dataset.ground_truth.cpu().numpy()
+        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=axes[0], name=name)
+
+        axes2[i].plot(labels, label="label")
+        t2 = t2.clip(max=6 * t2.mean())
+        t2 = (t2 - t2.min()) / (t2.max() - t2.min())
+        axes2[i].plot(t2, label="T2")
+        axes2[i].legend()
+        axes2[i].set_title(name)
+
+    axes[0].plot([0, 1], [0, 1], color="k", linestyle="--")
+    plt.legend()
+    plt.show()
+
+
+def fit_kpca(cfg: Config, dataset_root: str, device: torch.device) -> None:
+    parquet_file = os.path.abspath(
+        os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
+    )
+    training_dataset = SlidingDataset(
+        parquet_file=parquet_file,
+        operating_mode=cfg.operating_mode,
+        transient=cfg.transient,
+        window_size=cfg.window_size,
+        device=device,
+        features=cfg.features,
+        downsampling=cfg.measurement_downsampling,
+    )
+
+    summer = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [5, 6, 7, 8])
+    winter = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [10, 11, 12, 1])
+
     x_healthy_summer = training_dataset.measurements[summer, :]
     x_healthy_winter = training_dataset.measurements[winter, :]
 
-    # gamma, n_components = optimize_kpca(x_healthy_summer.cpu().numpy())
-    gamma = 0.0235
-    n_components = 43
+    # gamma, n_components = optimize_kpca(
+    #    training_dataset.measurements.cpu().numpy(),
+    #    num_gamma=5,
+    #    num_components=30,
+    #    gamma_log_min=-1.5,
+    #    gamma_log_max=1.5,
+    # )
+    # gamma = 0.0235
+    # n_components = 43
+    gamma = 0.04
+    n_components = 41
 
     kpca = KernelPCA(
         n_components=n_components,
@@ -291,9 +368,9 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
     )
     x_healthy_pca = kpca.fit_transform(x_healthy_summer.cpu().numpy())
 
-    fig, ax = plt.subplots()
-    fig2, axes = plt.subplots(2, 3)
-    axes = axes.flatten()
+    fig, axes = plt.subplots(1, 2)
+    fig2, axes2 = plt.subplots(2, 3)
+    axes2 = axes2.flatten()
 
     for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c"]):  # , "02_type_a", "02_type_b", "02_type_c"]):
         print(f"Testing on synthetic anomalies {name}")
@@ -303,22 +380,21 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
             transient=cfg.transient,
             window_size=cfg.window_size,
             features=cfg.features,
-            device=device,
             downsampling=cfg.measurement_downsampling,
+            device=device,
+            mean=training_dataset.mean,
+            std=training_dataset.std,
         )
-        dataset.measurements = x_healthy_winter
+        # dataset.measurements = torch.clone(x_healthy_summer)
         dataset.ground_truth = torch.zeros(dataset.measurements.shape[0], dtype=torch.bool, device=device)
-        dataset.ground_truth[1000:2000] = 1
-        dataset.measurements[dataset.ground_truth, :] += 0.5
-
-        # TODO: normalize test data using statistics from training set
+        dataset.ground_truth[dataset.ground_truth.shape[0] // 3 : dataset.ground_truth.shape[0] // 3 * 2] = 1
+        anomalous_cols = torch.from_numpy(dataset.df.columns.to_series().str.match("stat_.*").to_numpy())
+        print(dataset.df.columns[anomalous_cols])
+        anomalies = np.where(anomalous_cols, 20.0 / dataset.std, 0)
+        dataset.measurements[dataset.ground_truth, :] += anomalies
 
         x_test = dataset.measurements.cpu().numpy()
         x_test_pca = kpca.transform(x_test)
-
-        # ocsvm = OneClassSVM(kernel="rbf", nu=0.02)
-        # ocsvm.fit(x_healthy_pca)
-        # svm_pred = ocsvm.score_samples(x_test_pca)
 
         mean, covariance, inv_covariance = get_statistics(torch.from_numpy(x_healthy_pca))
         diff = torch.from_numpy(x_test_pca) - mean
@@ -331,22 +407,23 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
 
         labels = dataset.ground_truth.cpu().numpy()
         t2 = t2.cpu().numpy()
-        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=ax, name=name)
+        t2 = hotelling_t2(train=x_healthy_pca, test=x_test_pca)
 
-        axes[i].plot(labels, label="label")
+        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=axes[0], name=name)
+        RocCurveDisplay.from_predictions(y_true=labels, y_pred=msre, ax=axes[1], name=name)
+
+        axes2[i].plot(labels, label="label")
         t2 = t2.clip(max=4 * t2.mean())
         t2 = (t2 - t2.min()) / (t2.max() - t2.min())
+        msre = msre.clip(max=4 * msre.mean())
         msre = (msre - msre.min()) / (msre.max() - msre.min())
-        axes[i].plot(t2, label="T2")
-        axes[i].plot(msre, label="MSRE")
-        # axes[i].plot(x_test[:, 0], label="x")
-        # axes[i].plot(x_test_reconstructed[:, 0], label="Rec")
-        # svm_pred = (svm_pred - svm_pred.min()) / (svm_pred.max() - svm_pred.min())
-        # axes[i].plot(svm_pred - 2, label="SVM")
-        axes[i].legend()
-        axes[i].set_title(name)
+        axes2[i].plot(t2, label="T2")
+        axes2[i].plot(msre, label="MSRE")
+        axes2[i].legend()
+        axes2[i].set_title(name)
 
-    ax.plot([0, 1], [0, 1], color="k", linestyle="--")
+    axes[0].plot([0, 1], [0, 1], color="k", linestyle="--")
+    axes[1].plot([0, 1], [0, 1], color="k", linestyle="--")
     plt.legend()
     plt.show()
 
@@ -383,12 +460,13 @@ def kl_divergence(latent: torch.Tensor, rho: float) -> torch.Tensor:
     return torch.sum(kl)
 
 
-def optimize_kpca(input: np.ndarray) -> tuple[float, int]:
+def optimize_kpca(
+    input: np.ndarray, num_gamma: int, gamma_log_min: float, gamma_log_max: float, num_components: int
+) -> tuple[float, int]:
 
     data_train, data_val = train_test_split(input, test_size=0.2)
 
-    num_gamma = 11
-    gamma_values = 1.0 / input.shape[1] * np.logspace(-1.5, 1.5, num=num_gamma)
+    gamma_values = 1.0 / input.shape[1] * np.logspace(gamma_log_min, gamma_log_max, num=num_gamma)
     errors_gamma = []
     components = []
     errors_components = []
@@ -410,7 +488,7 @@ def optimize_kpca(input: np.ndarray) -> tuple[float, int]:
 
         # Cross-validate to find optimal number of components
         errors = []
-        n_components = np.linspace(start=1, stop=hyperdimension, num=100, endpoint=True, dtype=int)
+        n_components = np.linspace(start=1, stop=hyperdimension, num=num_components, endpoint=True, dtype=int)
         for n in tqdm(n_components):
             kpca = KernelPCA(
                 n_components=n,
@@ -474,3 +552,9 @@ def kneedle(x: np.ndarray, y: np.ndarray) -> int:
 
     # Find the index of the point furthest from the diagonal (elbow point)
     return np.argmax(y_norm - x_norm)
+
+
+def hotelling_t2(train: np.ndarray, test: np.ndarray) -> np.ndarray:
+    covariance_matrix = np.cov(train, rowvar=False)
+    covariance_matrix_inv = np.linalg.inv(covariance_matrix + 1e-6 * np.eye(covariance_matrix.shape[0]))
+    return np.sum((test @ covariance_matrix_inv) * test, axis=1)

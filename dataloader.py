@@ -12,9 +12,11 @@ class SlidingDataset(Dataset):
         operating_mode: Literal["turbine", "pump", "short_circuit"],
         transient: bool,
         window_size: int,
-        device: torch.device,
         features: list[str],
         downsampling: int,
+        device: torch.device,
+        mean: torch.Tensor | None = None,
+        std: torch.Tensor | None = None,
     ) -> None:
 
         self.window_size = window_size
@@ -65,6 +67,24 @@ class SlidingDataset(Dataset):
                 columns += matching_columns
             df = df[columns]
 
+        # FIXME
+        # Reduce features
+        def aggregate(name: str, cols: str) -> pd.DataFrame:
+            matching_columns = df.columns[df.columns.str.match(cols)]
+            df[name] = df[matching_columns].max(axis=1)
+            df.drop(columns=matching_columns, inplace=True)
+            return df
+
+        df = aggregate("stat_coil_agg", "stat_coil_.*")
+        df = aggregate("stat_magn_agg", "stat_magn_.*")
+        df = aggregate("current_agg", ".*_current")
+        df = aggregate("voltage_agg", ".*_voltage")
+        df = aggregate("air_circ_cold_agg", "air_circ_cold_.*")
+        df = aggregate("air_circ_hot_agg", "air_circ_hot_.*")
+        df = aggregate("water_circ_cold_agg", "water_circ_cold_.*")
+        df = aggregate("water_circ_hot_agg", "water_circ_hot_.*")
+        df.drop(columns=df.columns[df.columns.str.match("air_gap_.*")], inplace=True)
+
         # Save filtered dataframe
         self.df = df.copy()
         self.index = df.index.values.copy()
@@ -78,9 +98,13 @@ class SlidingDataset(Dataset):
 
         # Convert to tensor and normalize
         self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
-        mean = self.measurements.mean(dim=0, keepdim=True)
-        std = self.measurements.std(dim=0, keepdim=True)
-        self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
+        self.mean = mean if mean is not None else self.measurements.mean(dim=0)
+        self.std = std if std is not None else self.measurements.std(dim=0)
+        self.measurements = torch.where(
+            self.std.reshape(1, -1) > 0,
+            (self.measurements - self.mean.reshape(1, -1)) / self.std.reshape(1, -1),
+            self.measurements,
+        )
 
     def __len__(self) -> int:
         return len(self.start_indices)
