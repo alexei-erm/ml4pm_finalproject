@@ -152,3 +152,19 @@ class LSTMAE(nn.Module):
         reconstruction, _ = self.decoder_lstm(decoder_input)
         reconstruction = self.decoder_out_fc(reconstruction)
         return reconstruction, latent
+
+
+class LSTMForecaster(nn.Module):
+    def __init__(self, input_channels: int, window_size: int, cfg: LSTMAEConfig) -> None:
+        super(LSTMForecaster, self).__init__()
+
+        self.lstm = nn.LSTM(
+            input_size=input_channels, hidden_size=cfg.hidden_size, num_layers=cfg.num_layers, batch_first=True
+        )
+        self.fc = nn.Linear(cfg.hidden_size, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        output, (_, _) = self.lstm(x)
+        output = output[:, -1, :]
+        y = self.fc(output)
+        return y

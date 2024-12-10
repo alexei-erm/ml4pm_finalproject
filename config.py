@@ -29,10 +29,18 @@ class LSTMAEConfig:
     latent_sigmoid: bool
 
 
+@dataclass
+class LSTMForecasterConfig:
+    hidden_size: int
+    num_layers: int
+    target_feature: str
+
+
 class ModelType(Enum):
     FullyConnectedAE = "FullyConnectedAE"
     ConvolutionalAE = "ConvolutionalAE"
     LSTMAE = "LSTMAE"
+    LSTMForecaster = "LSTMForecaster"
     SPC = "SPC"
     KPCA = "KPCA"
 
@@ -40,7 +48,7 @@ class ModelType(Enum):
 @dataclass
 class Config:
     model: ModelType
-    model_cfg: FullyConnectedAEConfig | ConvolutionalAEConfig | LSTMAEConfig | None
+    model_cfg: FullyConnectedAEConfig | ConvolutionalAEConfig | LSTMAEConfig | LSTMForecasterConfig | None
     features: list[str]
     seed: int = 42
     unit: str = "VG5"
@@ -107,6 +115,43 @@ CFG["LSTMSimple"] = Config(
     model=ModelType.LSTMAE,
     model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
+    window_size=32,
+    measurement_downsampling=32,
+    epochs=1000,
+)
+
+
+CFG["LSTMForecaster"] = Config(
+    model=ModelType.LSTMForecaster,
+    model_cfg=LSTMForecasterConfig(hidden_size=128, num_layers=2, target_feature="stat_coil_ph01_01_tmp"),
+    features=[
+        "tot_activepower",
+        "ext_tmp",
+        "plant_tmp",
+        "charge",
+        "coupler_position",
+        "pump_calculated_flow",
+        "pump_pressure_diff",
+        "pump_rotspeed",
+        "tot_current",
+        "tot_effectivepower",
+        "tot_reactivepower",
+        "turbine_pressure",
+        "turbine_rotspeed",
+        "water_primary_pump_01_opening",
+        "water_primary_pump_02_opening",
+        "elec_freq",
+        "exc_current",
+        "exc_voltage",
+        "mid_voltage",
+        "stat_coil_ph01_01_tmp",
+        "water_circ_flow",
+        "air_gap_negative_x_position",
+        "air_gap_positive_x_position",
+        "air_gap_negative_y_position",
+        "air_gap_positive_y_position",
+        "total_injector_opening",
+    ],
     window_size=32,
     measurement_downsampling=32,
     epochs=1000,

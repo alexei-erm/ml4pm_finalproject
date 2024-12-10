@@ -259,6 +259,90 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
     plt.show()
 
 
+def train_forecaster(cfg: Config, dataset_root: str, log_dir: str, device: torch.device) -> None:
+    parquet_file = os.path.abspath(
+        os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
+    )
+    training_dataset = SlidingDataset(
+        parquet_file=parquet_file,
+        operating_mode=cfg.operating_mode,
+        transient=cfg.transient,
+        window_size=cfg.window_size,
+        device=device,
+        features=cfg.features,
+        downsampling=cfg.measurement_downsampling,
+    )
+
+    model_type = eval(cfg.model.value)
+    model = model_type(
+        input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
+    ).to(device)
+
+    target_features_index = np.nonzero(training_dataset.df.columns == cfg.model_cfg.target_feature)[0][0]
+
+    dump_yaml(os.path.join(log_dir, "config.yaml"), cfg)
+    dump_pickle(os.path.join(log_dir, "config.pkl"), cfg)
+    dump_pickle(os.path.join(log_dir, "model.pkl"), model)
+
+    train_loader, val_loader = create_train_val_dataloaders(
+        training_dataset,
+        batch_size=cfg.batch_size,
+        validation_split=cfg.validation_split,
+        subsampling=cfg.training_subsampling,
+    )
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    criterion = nn.MSELoss()
+
+    writer = SummaryWriter(log_dir=log_dir, flush_secs=10)
+
+    best_val_loss = torch.inf
+
+    for epoch in range(cfg.epochs):
+
+        model.train()
+
+        total_loss = 0.0
+
+        for x, _, _ in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{cfg.epochs}"):
+            optimizer.zero_grad(set_to_none=True)
+
+            # NOTE: x has shape (batch, window, features)
+            y_pred = model(x[:, :-1, :]).squeeze(-1)
+            y = x[:, -1, target_features_index]
+
+            loss = criterion(y_pred, y)
+            total_loss += loss.item()
+
+            loss.backward()
+            optimizer.step()
+
+        total_loss /= len(train_loader)
+
+        model.eval()
+
+        total_val_loss = 0.0
+        with torch.no_grad():
+            for x, _, _ in val_loader:
+                y_pred = model(x[:, :-1, :]).squeeze(-1)
+                y = x[:, -1, target_features_index]
+                loss = criterion(y_pred, y)
+                total_val_loss += loss.item()
+
+        total_val_loss /= len(val_loader)
+
+        if epoch % 10 == 0 or epoch == cfg.epochs - 1:
+            torch.save(model.state_dict(), os.path.join(log_dir, "model.pt"))
+
+        if total_val_loss < best_val_loss:
+            best_val_loss = total_val_loss
+            torch.save(model.state_dict(), os.path.join(log_dir, "best_model.pt"))
+
+        writer.add_scalar("Loss/Training", total_loss, epoch + 1)
+        writer.add_scalar("Loss/Validation", total_val_loss, epoch + 1)
+        print(f"Epoch {epoch + 1}/{cfg.epochs}, " f"Loss: Train={total_loss:.6f}, " f"Val.={total_val_loss:.6f}")
+
+
 def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
     parquet_file = os.path.abspath(
         os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")

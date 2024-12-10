@@ -42,7 +42,10 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-        train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        if "AE" in cfg.model.value:
+            train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+        else:
+            train_forecaster(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
 
     elif args.eval:
         run_name = args.run_name if args.run_name is not None else sorted(os.listdir(log_root_dir))[-1]
@@ -54,7 +57,14 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-        test_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device)
+        if "AE" in cfg.model:
+            test_autoencoder(
+                cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
+            )
+        else:
+            test_forecaster(
+                cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
+            )
 
 
 if __name__ == "__main__":
