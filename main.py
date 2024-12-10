@@ -25,13 +25,11 @@ def main(args: argparse.Namespace) -> None:
 
     if CFG[args.config].model == ModelType.SPC:
         cfg = CFG[args.config]
-        seed_all(cfg.seed)
-        fit_spc(cfg, dataset_root=args.dataset_root, device=device)
+        cfg = override_config(cfg, args)
 
-    elif CFG[args.config].model == ModelType.KPCA:
-        cfg = CFG[args.config]
         seed_all(cfg.seed)
-        fit_kpca(cfg, dataset_root=args.dataset_root, device=device)
+
+        fit_spc(cfg=cfg, dataset_root=args.dataset_root, device=device)
 
     elif args.train:
         run_name = args.run_name if args.run_name is not None else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -42,10 +40,11 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-        if "AE" in cfg.model.value:
-            train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+
+        if "PCA" in cfg.model.value:
+            fit_kpca(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir)
         else:
-            train_forecaster(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+            train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
 
     elif args.eval:
         run_name = args.run_name if args.run_name is not None else sorted(os.listdir(log_root_dir))[-1]
@@ -57,12 +56,11 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-        if "AE" in cfg.model.value:
-            test_autoencoder(
-                cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
-            )
+
+        if "PCA" in cfg.model.value:
+            test_kpca(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir)
         else:
-            test_forecaster(
+            test_autoencoder(
                 cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
             )
 
@@ -79,7 +77,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
     parser.add_argument(
-        "--operating_mode", type=str, choices=["pump", "turbine", "short_circuit"], help="Generator operating mode."
+        "--operating_mode",
+        type=str,
+        choices=["pump", "turbine", "short_circuit", "all"],
+        help="Generator operating mode.",
     )
     parser.add_argument(
         "--transient", action="store_true", default=None, help="Include transient (non equilibrium) samples."

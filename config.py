@@ -62,7 +62,7 @@ class Config:
     kl_divergence_rho: float = 0.05
     l1_weight: float = 0.0
     validation_split: float = 0.2
-    training_subsampling: int = 1
+    subsampling: int = 1
     measurement_downsampling: int = 1
 
 
@@ -79,7 +79,6 @@ CFG["OneSample"] = Config(
     features=[],
     window_size=1,
     measurement_downsampling=16,
-    epochs=1000,
 )
 CFG["OneSampleSparse"] = inherit(CFG["OneSample"], l1_weight=0.1)
 
@@ -102,7 +101,7 @@ CFG["Conv"] = Config(
 
 CFG["LSTM"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=32, num_layers=2, dropout=0.0, fc_hidden_sizes=[32], latent_sigmoid=False),
+    model_cfg=LSTMAEConfig(hidden_size=64, num_layers=2, dropout=0.0, fc_hidden_sizes=[32], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
     measurement_downsampling=32,
@@ -113,74 +112,29 @@ CFG["LSTMSparse"] = inherit(
 )
 CFG["LSTMSimple"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=128, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
+    model_cfg=LSTMAEConfig(hidden_size=16, num_layers=1, dropout=0.0, fc_hidden_sizes=[], latent_sigmoid=False),
     features=["stat_coil_ph01_01_tmp"],
     window_size=32,
     measurement_downsampling=32,
-    epochs=1000,
 )
 
-
-CFG["LSTMForecaster"] = Config(
-    model=ModelType.LSTMForecaster,
-    model_cfg=LSTMForecasterConfig(hidden_size=128, num_layers=2, target_feature="stat_coil_ph01_01_tmp"),
-    features=[
-        "tot_activepower",
-        "charge",
-        "coupler_position",
-        "total_injector_opening",
-        "pump_calculated_flow",
-        "pump_pressure_diff",
-        "pump_rotspeed",
-        "turbine_pressure",
-        "turbine_rotspeed",
-        "stat_coil_ph01_01_tmp",
-    ],
-    window_size=32,
-    measurement_downsampling=32,
-    epochs=1000,
-)
-
-"""[
-        "tot_activepower",
-        "ext_tmp",
-        "plant_tmp",
-        "charge",
-        "coupler_position",
-        "pump_calculated_flow",
-        "pump_pressure_diff",
-        "pump_rotspeed",
-        "tot_current",
-        "tot_effectivepower",
-        "tot_reactivepower",
-        "turbine_pressure",
-        "turbine_rotspeed",
-        "water_primary_pump_01_opening",
-        "water_primary_pump_02_opening",
-        "elec_freq",
-        "exc_current",
-        "exc_voltage",
-        "mid_voltage",
-        "stat_coil_ph01_01_tmp",
-        "water_circ_flow",
-        "air_gap_negative_x_position",
-        "air_gap_positive_x_position",
-        "air_gap_negative_y_position",
-        "air_gap_positive_y_position",
-        "total_injector_opening",
-    ],"""
 
 CFG["SPC"] = Config(
     model=ModelType.SPC,
     model_cfg=None,
     features=[],
+    operating_mode="all",
     window_size=1,
-    measurement_downsampling=32,
+    measurement_downsampling=16,
 )
+
+
 CFG["KPCA"] = Config(
     model=ModelType.KPCA,
     model_cfg=None,
     features=[],
+    operating_mode="all",
     window_size=1,
     measurement_downsampling=32,
+    subsampling=10,
 )

@@ -9,7 +9,7 @@ class SlidingDataset(Dataset):
     def __init__(
         self,
         parquet_file: str,
-        operating_mode: Literal["turbine", "pump", "short_circuit"],
+        operating_mode: Literal["turbine", "pump", "short_circuit", "all"],
         transient: bool,
         window_size: int,
         features: list[str],
@@ -27,9 +27,15 @@ class SlidingDataset(Dataset):
 
         # Filter operating mode
         if transient:
-            df = df[df[f"{operating_mode}_mode"]]
+            if operating_mode == "all":
+                df = df[df["machine_on"]]
+            else:
+                df = df[df["machine_on"] & df[f"{operating_mode}_mode"]]
         else:
-            df = df[df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
+            if operating_mode == "all":
+                df = df[df["machine_on"] & ~df["dyn_only_on"]]
+            else:
+                df = df[df["machine_on"] & df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
 
         # Remove operating mode variables from data
         operating_mode_vars = [var for var in df.columns if "mode" in var] + [
