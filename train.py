@@ -278,7 +278,7 @@ def train_forecaster(cfg: Config, dataset_root: str, log_dir: str, device: torch
         input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
     ).to(device)
 
-    target_features_index = np.nonzero(training_dataset.df.columns == cfg.model_cfg.target_feature)[0][0]
+    target_feature_index = np.nonzero(training_dataset.df.columns == cfg.model_cfg.target_feature)[0][0]
 
     dump_yaml(os.path.join(log_dir, "config.yaml"), cfg)
     dump_pickle(os.path.join(log_dir, "config.pkl"), cfg)
@@ -309,7 +309,7 @@ def train_forecaster(cfg: Config, dataset_root: str, log_dir: str, device: torch
 
             # NOTE: x has shape (batch, window, features)
             y_pred = model(x[:, :-1, :]).squeeze(-1)
-            y = x[:, -1, target_features_index]
+            y = x[:, -1, target_feature_index]
 
             loss = criterion(y_pred, y)
             total_loss += loss.item()
@@ -325,7 +325,7 @@ def train_forecaster(cfg: Config, dataset_root: str, log_dir: str, device: torch
         with torch.no_grad():
             for x, _, _ in val_loader:
                 y_pred = model(x[:, :-1, :]).squeeze(-1)
-                y = x[:, -1, target_features_index]
+                y = x[:, -1, target_feature_index]
                 loss = criterion(y_pred, y)
                 total_val_loss += loss.item()
 
@@ -341,6 +341,113 @@ def train_forecaster(cfg: Config, dataset_root: str, log_dir: str, device: torch
         writer.add_scalar("Loss/Training", total_loss, epoch + 1)
         writer.add_scalar("Loss/Validation", total_val_loss, epoch + 1)
         print(f"Epoch {epoch + 1}/{cfg.epochs}, " f"Loss: Train={total_loss:.6f}, " f"Val.={total_val_loss:.6f}")
+
+
+def test_forecaster(cfg: Config, dataset_root: str, log_dir: str, load_best: bool, device: torch.device) -> None:
+    if cfg.unit == "VG4":
+        print("Evaluation is not possible with VG4")
+        return
+
+    parquet_file = os.path.abspath(
+        os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
+    )
+    training_dataset = SlidingDataset(
+        parquet_file=parquet_file,
+        operating_mode=cfg.operating_mode,
+        transient=cfg.transient,
+        window_size=cfg.window_size,
+        device=device,
+        features=cfg.features,
+        downsampling=cfg.measurement_downsampling,
+    )
+
+    target_feature_index = np.nonzero(training_dataset.df.columns == cfg.model_cfg.target_feature)[0][0]
+
+    model_type = eval(cfg.model.value)
+    model = model_type(
+        input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
+    ).to(device)
+
+    model_state_path = os.path.join(log_dir, "best_model.pt" if load_best else "model.pt")
+    model.load_state_dict(torch.load(model_state_path, weights_only=True, map_location=device))
+
+    model.eval()
+
+    figs = []
+    axes = []
+    for _ in range(6):
+        fig, ax = plt.subplots()
+        figs.append(fig)
+        axes.append(ax)
+
+    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
+        ax = axes[i]
+
+        dataset = SlidingDataset(
+            parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
+            operating_mode=cfg.operating_mode,
+            transient=cfg.transient,
+            window_size=cfg.window_size,
+            features=cfg.features,
+            device=device,
+            downsampling=cfg.measurement_downsampling,
+            mean=training_dataset.mean,
+            std=training_dataset.std,
+        )
+        if len(dataset) == 0:
+            continue
+
+        loader = create_dataloader(dataset, batch_size=cfg.batch_size)
+
+        indices = []
+        preds = []
+        xs = []
+        labels = []
+        mse = []
+
+        with torch.no_grad():
+            for x, y, index in tqdm(loader):
+                x[y == 1] += 1.0
+
+                xs.append(x)
+                labels.append(y)
+                indices.append(index)
+
+                y_pred = model(x[:, :-1, :]).squeeze(-1)
+                y_true = x[:, -1, target_feature_index]
+                preds.append(y_pred)
+
+                error = torch.square(y_pred - y_true)
+                mse.append(error)
+
+        xs = torch.concatenate(xs).cpu().numpy()
+        preds = torch.concatenate(preds).cpu().numpy()
+        indices = np.concatenate(indices)
+        labels = torch.concatenate(labels).cpu().numpy()
+        mse = torch.concatenate(mse).cpu().numpy()
+
+        xs = xs[:, -1, target_feature_index]
+        indices = indices[:, -1]
+        labels = labels[:, -1]
+
+        mse = (mse - mse.min()) / (mse.max() - mse.min())
+
+        ax.plot(xs, label="x")
+        ax.tick_params(axis="x", labelrotation=45)
+        ax.plot(preds, label="pred")
+        ax.plot(mse, label="MSE")
+
+        for start, end in zip(
+            np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]
+        ):
+            ax.axvspan(start, end, color="red", alpha=0.3)
+
+        ax.set_title(name)
+        ax.legend()
+
+    for fig in figs:
+        fig.tight_layout()
+    plt.show()
 
 
 def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:

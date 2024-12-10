@@ -126,6 +126,23 @@ CFG["LSTMForecaster"] = Config(
     model_cfg=LSTMForecasterConfig(hidden_size=128, num_layers=2, target_feature="stat_coil_ph01_01_tmp"),
     features=[
         "tot_activepower",
+        "charge",
+        "coupler_position",
+        "total_injector_opening",
+        "pump_calculated_flow",
+        "pump_pressure_diff",
+        "pump_rotspeed",
+        "turbine_pressure",
+        "turbine_rotspeed",
+        "stat_coil_ph01_01_tmp",
+    ],
+    window_size=32,
+    measurement_downsampling=32,
+    epochs=1000,
+)
+
+"""[
+        "tot_activepower",
         "ext_tmp",
         "plant_tmp",
         "charge",
@@ -151,12 +168,7 @@ CFG["LSTMForecaster"] = Config(
         "air_gap_negative_y_position",
         "air_gap_positive_y_position",
         "total_injector_opening",
-    ],
-    window_size=32,
-    measurement_downsampling=32,
-    epochs=1000,
-)
-
+    ],"""
 
 CFG["SPC"] = Config(
     model=ModelType.SPC,

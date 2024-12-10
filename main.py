@@ -57,7 +57,7 @@ def main(args: argparse.Namespace) -> None:
         cfg = override_config(cfg, args)
 
         seed_all(cfg.seed)
-        if "AE" in cfg.model:
+        if "AE" in cfg.model.value:
             test_autoencoder(
                 cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
             )
