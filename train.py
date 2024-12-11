@@ -125,10 +125,8 @@ def train_autoencoder(cfg: Config, dataset_root: str, log_dir: str, device: torc
 
 
 def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bool, device: torch.device) -> None:
-    if cfg.unit == "VG4":
-        print("Evaluation is not possible with VG4")
-        return
 
+    # Load training data
     parquet_file = os.path.abspath(
         os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
     )
@@ -142,6 +140,7 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
         downsampling=cfg.measurement_downsampling,
     )
 
+    # Load model
     model_type = eval(cfg.model.value)
     model = model_type(
         input_channels=training_dataset.measurements.shape[-1], window_size=cfg.window_size, cfg=cfg.model_cfg
@@ -152,111 +151,96 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
 
     model.eval()
 
+    # Compute statistics of the training set
     train_loader = create_dataloader(training_dataset, batch_size=cfg.batch_size)
-    train_latent = get_latent_features(model, train_loader)
-
-    ocsvm = OneClassSVM(nu=0.002)
-    ocsvm.fit(train_latent.cpu().numpy())
-
+    train_x, train_pred, train_latent = get_all_data(model, train_loader)
     latent_mean, latent_covariance, inv_latent_covariance = get_statistics(train_latent)
 
-    figs = []
-    axes = []
-    for _ in range(6):
-        fig, ax = plt.subplots()
-        figs.append(fig)
-        axes.append(ax)
+    # Compute scores on training set and set thresholds accordingly
+    train_msre = torch.mean(torch.square(train_pred - train_x), dim=(1, 2))
 
-    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
-        ax = axes[i]
+    latent_diff = train_latent - latent_mean.unsqueeze(0)
+    train_t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
 
-        dataset = SlidingDataset(
-            parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
-            operating_mode=cfg.operating_mode,
-            transient=cfg.transient,
-            window_size=cfg.window_size,
-            features=cfg.features,
-            device=device,
-            downsampling=cfg.measurement_downsampling,
-            mean=training_dataset.mean,
-            std=training_dataset.std,
-        )
-        if len(dataset) == 0:
-            continue
+    threshold_t2 = np.percentile(train_t2.cpu().numpy(), 99.9)
+    threshold_msre = np.percentile(train_msre.cpu().numpy(), 99.9)
 
-        loader = create_dataloader(dataset, batch_size=cfg.batch_size)
+    if cfg.unit != "VG4":
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
 
-        indices = []
-        preds = []
-        xs = []
-        labels = []
-        spes = []
-        t2s = []
-        svm = []
+            # Load synthetic anomalies
+            testing_dataset = SlidingDataset(
+                parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
+                operating_mode=cfg.operating_mode,
+                transient=cfg.transient,
+                window_size=cfg.window_size,
+                features=cfg.features,
+                device=device,
+                downsampling=cfg.measurement_downsampling,
+                mean=training_dataset.mean,
+                std=training_dataset.std,
+            )
 
-        with torch.no_grad():
-            for x, y, index in tqdm(loader):
-                x[y == 1] += 0.5
+            loader = create_dataloader(testing_dataset, batch_size=cfg.batch_size)
 
-                xs.append(x)
-                labels.append(y)
-                indices.append(index)
+            indices = []
+            preds = []
+            xs = []
+            labels = []
+            msres = []
+            t2s = []
 
-                reconstruction, latent = model(x)
-                preds.append(reconstruction)
+            # Evaluate model
+            with torch.no_grad():
+                for x, y, index in tqdm(loader):
+                    xs.append(x)
+                    labels.append(y)
+                    indices.append(index)
 
-                spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
-                spes.append(spe)
+                    reconstruction, latent = model(x)
+                    preds.append(reconstruction)
 
-                latent_diff = latent - latent_mean.unsqueeze(0)
-                t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
-                t2s.append(t2)
+                    msre = torch.mean(torch.square(reconstruction - x), dim=(1, 2))
+                    msres.append(msre)
 
-                svm.append(ocsvm.predict(latent.cpu().numpy()))
+                    latent_diff = latent - latent_mean.unsqueeze(0)
+                    t2 = torch.einsum("bi,ij,bj->b", latent_diff, inv_latent_covariance, latent_diff)
+                    t2s.append(t2)
 
-        xs = torch.concatenate(xs).cpu().numpy()
-        preds = torch.concatenate(preds).cpu().numpy()
-        indices = np.concatenate(indices)
-        labels = torch.concatenate(labels).cpu().numpy()
-        spes = torch.concatenate(spes).cpu().numpy()
-        t2s = torch.concatenate(t2s).cpu().numpy()
-        svm = np.concatenate(svm)
+            xs = torch.concatenate(xs).cpu().numpy()
+            preds = torch.concatenate(preds).cpu().numpy()
+            indices = np.concatenate(indices)
+            labels = torch.concatenate(labels).cpu().numpy()
+            msres = torch.concatenate(msres).cpu().numpy()
+            t2s = torch.concatenate(t2s).cpu().numpy()
 
-        indices = indices[:, -1]
-        labels = labels[:, -1]
-        xs = xs[:, -1, 0]
-        preds = preds[:, -1, 0]
+            fault_t2 = t2s >= threshold_t2
+            fault_msre = msres >= threshold_msre
 
-        # spes = spes.clip(max=spes.mean() + 3.0 * spes.std())
-        # t2s = t2s.clip(max=t2s.mean() + 3.0 * t2s.std())
-        spes = (spes - spes.min()) / (spes.max() - spes.min())
-        t2s = (t2s - t2s.min()) / (t2s.max() - t2s.min())
+            indices = indices[:, -1]
+            labels = labels[:, -1]
+            feature_index = 0
+            feature_name = testing_dataset.df.columns[feature_index]
+            xs = xs[:, -1, feature_index]
+            preds = preds[:, -1, feature_index]
 
-        # Find gaps in timestamps
-        # gaps = np.diff(indices) > np.timedelta64(30, "s") * cfg.measurement_downsampling
-        # gap_indices = np.nonzero(gaps)[0] + 1
+            t2s = clip_positive_outliers(t2s, threshold=10)
+            msres = clip_positive_outliers(msres, threshold=10)
 
-        # for idx in gap_indices:
-        #    ax.axvline(x=idx, color="k", linestyle="--", label="Gap" if idx == gap_indices[0] else None)
-
-        ax.plot(xs, label="x")
-        ax.tick_params(axis="x", labelrotation=45)
-        ax.plot(preds, label="pred")
-        ax.plot(spes, label="SPE")
-        ax.plot(t2s, label="T2")
-        ax.plot(svm, label="OCSVM")
-
-        for start, end in zip(
-            np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0]
-        ):
-            ax.axvspan(start, end, color="red", alpha=0.3)
-
-        ax.set_title(name)
-        ax.legend()
-
-    for fig in figs:
-        fig.tight_layout()
-    plt.show()
+            plot_scores(
+                t2=t2s,
+                msre=msres,
+                fault_t2=fault_t2,
+                fault_msre=fault_msre,
+                threshold_t2=threshold_t2,
+                threshold_msre=threshold_msre,
+                labels=labels,
+                x_true=xs,
+                x_pred=preds,
+                title=f"{cfg.model.value}, operating mode {cfg.operating_mode}: anomaly scores\n"
+                f"(T2 and MSRE) and signal reconstruction for {feature_name}",
+                file_name=f"plots/{cfg.model.value}_{cfg.unit}_{cfg.operating_mode}_{name}.png",
+            )
 
 
 def fit_spc(cfg: Config, dataset_root: str) -> None:
@@ -275,69 +259,104 @@ def fit_spc(cfg: Config, dataset_root: str) -> None:
         features=cfg.features,
         downsampling=cfg.measurement_downsampling,
     )
+    x_healthy_train, x_healthy_val = train_test_split(training_dataset.measurements.cpu().numpy(), test_size=0.2)
+    x_healthy_train = x_healthy_train[:: cfg.subsampling]
+    x_healthy_val = x_healthy_val[:: cfg.subsampling]
 
-    # Shuffle dataset and subsample if necessary
-    x_healthy = training_dataset.measurements.cpu().numpy()
-    indices = np.arange(x_healthy.shape[0])
-    np.random.shuffle(indices)
-    x_healthy = x_healthy[indices[:: cfg.subsampling], :]
-    print(f"Fitting SPC model on healthy data of shape {x_healthy.shape}")
+    # Compute T2 for validation set and select threshold accordingly
+    val_t2, _ = hotelling_t2(train=x_healthy_train, test=x_healthy_val)
+    threshold = np.percentile(val_t2, 99.95)
 
-    # Compute T2 for training set and select threshold
-    t2, _ = hotelling_t2(train=x_healthy, test=x_healthy)
-    threshold = np.percentile(t2, 99.99)
+    if cfg.unit != "VG4":
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+            # Load synthetic anomalies
+            testing_dataset = SlidingDataset(
+                parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
+                operating_mode=cfg.operating_mode,
+                transient=cfg.transient,
+                window_size=cfg.window_size,
+                features=cfg.features,
+                downsampling=cfg.measurement_downsampling,
+                device="cpu",
+                mean=training_dataset.mean,
+                std=training_dataset.std,
+            )
+            x_test = testing_dataset.measurements.cpu().numpy()
 
-    for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
-        # Load anomalies
-        dataset = SlidingDataset(
-            parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
-            operating_mode=cfg.operating_mode,
-            transient=cfg.transient,
-            window_size=cfg.window_size,
-            features=cfg.features,
-            downsampling=cfg.measurement_downsampling,
-            device="cpu",
-            mean=training_dataset.mean,
-            std=training_dataset.std,
-        )
+            # Compute T2 and individual feature contributions
+            t2, contributions = hotelling_t2(train=x_healthy_train, test=x_test)
 
-        # Compute T2
-        t2, contributions = hotelling_t2(train=x_healthy, test=dataset.measurements.cpu().numpy())
-        plt.imshow(np.abs(contributions).T, aspect="auto", cmap="inferno")
-        plt.show()
-        exit()
+            # Fault detection
+            pred = t2 >= threshold
 
-        # Fault detection
-        pred = t2 >= threshold
+            # Compute metrics
+            labels = testing_dataset.ground_truth.cpu().numpy()
+            tpr, fpr = compute_tpr_fpr(pred=pred, labels=labels)
+            ttd = compute_time_to_detection(pred=pred, labels=labels, index=testing_dataset.index)
+            mean_ttd = np.mean([t for t in ttd if t is not None])
+            print(f"Synthetic anomalies {name}: TPR={tpr:.4f}, FPR={fpr:.4f}, mean TTD={mean_ttd:.2f}h")
 
-        labels = dataset.ground_truth.cpu().numpy()
-        tpr, fpr = compute_tpr_fpr(pred=pred, labels=labels)
-        print(f"Synthetic anomalies {name}: TPR={tpr:.3f}, FPR={fpr:.3f}")
+            t2 = clip_positive_outliers(t2, threshold=100.0)
 
-        fig, ax = plt.subplots(2, 1, sharex=True, figsize=(12, 10))
+            if cfg.transient:
+                file_name = f"plots/spc_{cfg.unit}_{name}_transient.png"
+            else:
+                file_name = f"plots/spc_{cfg.unit}_{name}.png"
 
-        for i, (start, end) in enumerate(
-            zip(np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0])
-        ):
-            ax[0].axvspan(start, end, color="red", alpha=0.3, label="Ground truth" if i == 0 else None)
+            plot_score_and_contributions(
+                score=t2,
+                pred=pred,
+                threshold=threshold,
+                contributions=contributions,
+                labels=labels,
+                index=testing_dataset.index,
+                features=testing_dataset.df.columns,
+                score_type="T2",
+                title=f"SPC: anomaly T2 score and fault detection for {cfg.unit} synthetic anomalies {name}\n"
+                f"TPR={tpr:.4f}, FPR={fpr:.4f}, mean TTD={mean_ttd:.2f}h",
+                file_name=file_name,
+            )
 
-        t2 = clip_positive_outliers(t2, threshold=100.0)
-        t2 = (t2 - t2.min()) / (t2.max() - t2.min())
-        ax[0].plot(t2, label="T2")
-        ax[0].set_xlabel("Sample")
-        ax[0].set_ylabel("Normalized T2")
-        ax[0].legend()
+    # Load real testing dataset
+    testing_dataset = SlidingDataset(
+        parquet_file=os.path.join(dataset_root, f"{cfg.unit}_generator_data_testing_real_measurements.parquet"),
+        operating_mode=cfg.operating_mode,
+        transient=cfg.transient,
+        window_size=cfg.window_size,
+        features=cfg.features,
+        downsampling=cfg.measurement_downsampling,
+        device="cpu",
+        mean=training_dataset.mean,
+        std=training_dataset.std,
+    )
+    x_test = testing_dataset.measurements.cpu().numpy()
 
-        for i, (start, end) in enumerate(
-            zip(np.where(np.diff(pred, prepend=0) == 1)[0], np.where(np.diff(pred, append=0) == -1)[0])
-        ):
-            ax[1].axvspan(start, end, color="orange", alpha=0.3, label="Detected fault" if i == 0 else None)
-        ax[1].set_xlabel("Sample")
-        ax[1].legend()
+    # Compute T2 and individual feature contributions
+    t2, contributions = hotelling_t2(train=x_healthy_train, test=x_test)
 
-        fig.tight_layout()
-        fig.suptitle(f"Anomaly T2 score and fault detection for synthetic anomalies {name}")
-        fig.savefig(f"plots/spc_{cfg.unit}_{name}")
+    # Fault detection
+    pred = t2 >= threshold
+
+    t2 = clip_positive_outliers(t2, threshold=100.0)
+    contributions = clip_positive_outliers(np.abs(contributions), threshold=20)
+
+    if cfg.transient:
+        file_name = f"plots/spc_{cfg.unit}_testing_real_transient.png"
+    else:
+        file_name = f"plots/spc_{cfg.unit}_testing_real.png"
+
+    plot_score_and_contributions(
+        score=t2,
+        pred=pred,
+        threshold=threshold,
+        contributions=contributions,
+        labels=None,
+        index=testing_dataset.index,
+        features=testing_dataset.df.columns,
+        score_type="T2",
+        title=f"SPC: anomaly T2 score and fault detection for {cfg.unit},\nfor the real testing dataset",
+        file_name=file_name,
+    )
 
 
 def fit_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
@@ -368,13 +387,15 @@ def fit_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
         num_components=40,
         gamma_log_min=-1.0,
         gamma_log_max=1.0,
-        name="test",
+        file_name=f"plots/kpca_{cfg.unit}_{cfg.operating_mode}_optimization.png",
     )
     kpca_params = {"gamma": gamma, "n_components": n_components}
     dump_yaml(os.path.join(log_dir, "kpca_params.yaml"), kpca_params)
 
 
 def test_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
+
+    # Load training data
     parquet_file = os.path.abspath(
         os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
     )
@@ -387,16 +408,14 @@ def test_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
         features=cfg.features,
         downsampling=cfg.measurement_downsampling,
     )
+    x_healthy_train, x_healthy_val = train_test_split(training_dataset.measurements.cpu().numpy(), test_size=0.2)
+    x_healthy_train = x_healthy_train[:: cfg.subsampling]
+    x_healthy_val = x_healthy_val[:: cfg.subsampling]
 
-    summer = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [5, 6, 7, 8])
-    winter = np.isin(training_dataset.index.astype("datetime64[M]").astype(int) % 12 + 1, [10, 11, 12, 1])
-
-    x_healthy_summer = training_dataset.measurements[summer, :]
-    x_healthy_winter = training_dataset.measurements[winter, :]
-    x_healthy = training_dataset.measurements
-
-    gamma = 0.021
-    n_components = 37
+    # Fit KernelPCA model
+    params = load_yaml(os.path.join(log_dir, "kpca_params.yaml"))
+    gamma = params["gamma"]
+    n_components = params["n_components"]
 
     kpca = KernelPCA(
         n_components=n_components,
@@ -406,93 +425,112 @@ def test_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
         eigen_solver="randomized",
         n_jobs=-1,
     )
-    x_healthy_pca = kpca.fit_transform(x_healthy)
+    kpca.fit(x_healthy_train)
 
-    fig, axes = plt.subplots(1, 2)
-    fig2, axes2 = plt.subplots(2, 3)
-    axes2 = axes2.flatten()
+    # Compute reconstruction error on validation samples and select threshold accordingly
+    val_msre, _ = compute_msre(kpca, x=x_healthy_val)
+    threshold = np.percentile(val_msre, 99.5)
 
-    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
-        print(f"Testing on synthetic anomalies {name}")
-        dataset = SlidingDataset(
-            parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
-            operating_mode=cfg.operating_mode,
-            transient=cfg.transient,
-            window_size=cfg.window_size,
-            features=cfg.features,
-            downsampling=cfg.measurement_downsampling,
-            device="cpu",
-            mean=training_dataset.mean,
-            std=training_dataset.std,
-        )
-        # dataset.measurements = torch.clone(x_healthy)
-        dataset.ground_truth = torch.zeros(dataset.measurements.shape[0], dtype=torch.bool, device="cpu")
-        dataset.ground_truth[dataset.ground_truth.shape[0] // 3 : dataset.ground_truth.shape[0] // 3 * 2] = 1
-        anomalous_cols = torch.from_numpy(dataset.df.columns.to_series().str.match("stat_coil_*").to_numpy())
-        # print(dataset.df.columns[anomalous_cols])
-        anomalies = np.where(anomalous_cols, 5.0 / dataset.std, 0)
-        dataset.measurements[dataset.ground_truth, :] += anomalies
+    if cfg.unit != "VG4":
+        for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+            # Load synthetic anomalies
+            testing_dataset = SlidingDataset(
+                parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
+                operating_mode=cfg.operating_mode,
+                transient=cfg.transient,
+                window_size=cfg.window_size,
+                features=cfg.features,
+                downsampling=cfg.measurement_downsampling,
+                device="cpu",
+                mean=training_dataset.mean,
+                std=training_dataset.std,
+            )
+            x_test = testing_dataset.measurements.cpu().numpy()
 
-        x_test = dataset.measurements.cpu().numpy()
-        x_test_pca = kpca.transform(x_test)
-        x_test_reconstructed = kpca.inverse_transform(x_test_pca)
-        msre = np.mean(np.square(x_test_reconstructed - x_test), axis=1)
+            # Compute MSRE and individual feature contributions
+            msre, contributions = compute_msre(kpca, x=x_test)
 
-        labels = dataset.ground_truth.cpu().numpy()
+            # Fault detection
+            pred = msre >= threshold
 
-        t2 = hotelling_t2(train=x_healthy_pca, test=x_test_pca)
+            # Compute metrics
+            labels = testing_dataset.ground_truth.cpu().numpy()
+            tpr, fpr = compute_tpr_fpr(pred=pred, labels=labels)
+            ttd = compute_time_to_detection(pred=pred, labels=labels, index=testing_dataset.index)
+            filtered_ttd = [t for t in ttd if t is not None]
+            mean_ttd = np.mean(filtered_ttd) if len(filtered_ttd) > 0 else np.nan
+            print(f"Synthetic anomalies {name}: TPR={tpr:.4f}, FPR={fpr:.4f}, mean TTD={mean_ttd:.2f}h")
 
-        from sklearn.metrics import roc_auc_score
+            msre = clip_positive_outliers(msre, threshold=50.0)
 
-        """scores = np.zeros((11, 17))
-        for i, gamma in enumerate(1.0 / x_healthy_pca.shape[1] * np.logspace(-5, 2, num=11)):
-            for j, nu in enumerate(np.logspace(-5, -0.5, num=17)):
-                print(f"{i} {j} {gamma:.8f} {nu:.8f}", end="")
-                ocsvm = OneClassSVM(kernel="rbf", cache_size=4000, gamma=gamma, nu=nu)
-                ocsvm.fit(x_healthy_pca)
-                # pred = -ocsvm.score_samples(x_test_pca)
-                pred = -ocsvm.decision_function(x_test_pca)
-                score = roc_auc_score(y_true=labels, y_score=pred)
-                scores[i, j] = score
-                print(f" -> {score:.4f}")
+            plot_score_and_contributions(
+                score=msre,
+                pred=pred,
+                threshold=threshold,
+                contributions=contributions,
+                labels=labels,
+                index=testing_dataset.index,
+                features=testing_dataset.df.columns,
+                score_type="MSRE",
+                title=f"KPCA: anomaly MSRE score and fault detection for {cfg.unit} synthetic anomalies {name}\n"
+                f"TPR={tpr:.4f}, FPR={fpr:.4f}, mean TTD={mean_ttd:.2f}h",
+                file_name=f"plots/kpca_{cfg.unit}_{cfg.operating_mode}_{name}.png",
+            )
 
-        print(scores)
-        plt.imshow(scores)
-        plt.show()"""
-        ocsvm = OneClassSVM(kernel="rbf", cache_size=4000, gamma=0.003, nu=0.31)
-        ocsvm.fit(x_healthy_pca)
-        t2 = -ocsvm.score_samples(x_test_pca)
+    # Load real testing dataset
+    testing_dataset = SlidingDataset(
+        parquet_file=os.path.join(dataset_root, f"{cfg.unit}_generator_data_testing_real_measurements.parquet"),
+        operating_mode=cfg.operating_mode,
+        transient=cfg.transient,
+        window_size=cfg.window_size,
+        features=cfg.features,
+        downsampling=cfg.measurement_downsampling,
+        device="cpu",
+        mean=training_dataset.mean,
+        std=training_dataset.std,
+    )
+    x_test = testing_dataset.measurements.cpu().numpy()
 
-        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=axes[0], name=name)
-        RocCurveDisplay.from_predictions(y_true=labels, y_pred=msre, ax=axes[1], name=name)
+    # Compute MSRE and individual feature contributions
+    msre, contributions = compute_msre(kpca, x=x_test)
 
-        axes2[i].plot(labels, label="label")
-        # t2 = t2.clip(max=4 * t2.mean())
-        t2 = (t2 - t2.min()) / (t2.max() - t2.min())
-        # msre = msre.clip(max=4 * msre.mean())
-        msre = (msre - msre.min()) / (msre.max() - msre.min())
-        axes2[i].plot(t2, label="T2")
-        axes2[i].plot(msre, label="MSRE")
-        axes2[i].legend()
-        axes2[i].set_title(name)
+    # Fault detection
+    pred = msre >= threshold
 
-    axes[0].plot([0, 1], [0, 1], color="k", linestyle="--")
-    axes[1].plot([0, 1], [0, 1], color="k", linestyle="--")
-    plt.legend()
-    plt.show()
+    msre = clip_positive_outliers(msre, threshold=50.0)
+    contributions = clip_positive_outliers(np.abs(contributions), threshold=10)
+
+    plot_score_and_contributions(
+        score=msre,
+        pred=pred,
+        threshold=threshold,
+        contributions=contributions,
+        labels=None,
+        index=testing_dataset.index,
+        features=testing_dataset.df.columns,
+        score_type="MSRE",
+        title=f"KPCA: anomaly MSRE score and fault detection for {cfg.unit},\nfor the real testing dataset",
+        file_name=f"plots/kpca_{cfg.unit}_{cfg.operating_mode}_testing_real.png",
+    )
 
 
-def get_latent_features(model: nn.Module, dataloader: DataLoader) -> torch.Tensor:
-    """Returns a tensor of shape (n_samples, n_features) of all the latent features for the given model and data."""
+def get_all_data(model: nn.Module, dataloader: DataLoader) -> tuple[torch.Tensor, torch.Tensor]:
+    """Returns a tensor of all the input signals and reconstructions,
+    as well as all the latent features for the given model and data."""
 
     model.eval()
+
+    all_x = []
+    all_reconstructions = []
     all_latent = []
     with torch.no_grad():
         for x, _, _ in tqdm(dataloader):
-            _, latent = model(x)
+            x_reconstructed, latent = model(x)
+            all_x.append(x)
+            all_reconstructions.append(x_reconstructed)
             all_latent.append(latent)
 
-    return torch.concatenate(all_latent)
+    return torch.concatenate(all_x), torch.concatenate(all_reconstructions), torch.concatenate(all_latent)
 
 
 def get_statistics(input: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -515,7 +553,7 @@ def kl_divergence(latent: torch.Tensor, rho: float) -> torch.Tensor:
 
 
 def optimize_kpca(
-    input: np.ndarray, num_gamma: int, gamma_log_min: float, gamma_log_max: float, num_components: int, name: str
+    input: np.ndarray, num_gamma: int, gamma_log_min: float, gamma_log_max: float, num_components: int, file_name: str
 ) -> tuple[float, int]:
 
     print(f"Optimizing KPCA model, dataset shape: {input.shape}")
@@ -594,12 +632,14 @@ def optimize_kpca(
     ax[1].set_ylabel("MSRE")
     ax[1].set_title(f"Error vs n_components for optimal gamma = {best_gamma:.4f}")
     ax[1].legend()
-    fig.savefig(f"plots/kpca_{name}.png")
+    fig.savefig(file_name)
 
     return best_gamma, best_components
 
 
 def kneedle(x: np.ndarray, y: np.ndarray) -> int:
+    """Finds the index of the elbow using the Kneedle algorithm."""
+
     # If the values are decreasing, flip them
     if y[-1] < y[0]:
         y = -y
@@ -612,7 +652,7 @@ def kneedle(x: np.ndarray, y: np.ndarray) -> int:
     return np.argmax(y_norm - x_norm)
 
 
-def hotelling_t2(train: np.ndarray, test: np.ndarray) -> np.ndarray:
+def hotelling_t2(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Computes the Hotelling's T2 statistic and feature contributions for each test sample."""
 
     # Compute mean and covariance of the training data
@@ -637,6 +677,18 @@ def hotelling_t2(train: np.ndarray, test: np.ndarray) -> np.ndarray:
     return t2_scores, feature_contributions
 
 
+def compute_msre(kpca: KernelPCA, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Computes the Mean Square Reconstruction Error and individual feature contributions."""
+
+    x_pca = kpca.transform(x)
+    x_reconstructed = kpca.inverse_transform(x_pca)
+    sre = np.square(x_reconstructed - x)
+    msre = np.mean(sre, axis=1)
+    contributions = sre
+
+    return msre, contributions
+
+
 def compute_tpr_fpr(pred: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
     """Computes the True Positive Rate (TPR) and False Positive Rate (FPR)"""
 
@@ -653,7 +705,7 @@ def compute_tpr_fpr(pred: np.ndarray, labels: np.ndarray) -> tuple[float, float]
     return tpr, fpr
 
 
-def clip_positive_outliers(input: np.ndarray, threshold=1.5) -> np.ndarray:
+def clip_positive_outliers(input: np.ndarray, threshold=1.0) -> np.ndarray:
     """Clips outliers from an array based on the interquartile range"""
 
     # Compute Q1 and Q3
@@ -664,3 +716,153 @@ def clip_positive_outliers(input: np.ndarray, threshold=1.5) -> np.ndarray:
     # Compute bound and clip
     upper_bound = q3 + threshold * iqr
     return input.clip(max=upper_bound)
+
+
+def compute_time_to_detection(pred: np.ndarray, labels: np.ndarray, index: np.ndarray) -> list[float | None]:
+    """
+    Compute the time to detection (TTD) for each labeled fault.
+    Returns a list of time to detection for each labeled fault, in hours.
+    If no detection occurs, returns None for that fault.
+    """
+
+    ttds = []
+    fault_indices = np.where(labels == 1)[0]  # Indices where faults are labeled
+
+    # Iterate through each fault index
+    for fault_start in fault_indices:
+        if fault_start > 0 and labels[fault_start - 1] == 1:
+            # Skip if this fault index is part of an ongoing fault already accounted for
+            continue
+
+        # Find the first prediction after the fault starts
+        detection_indices = np.where(pred[fault_start:] == 1)[0]
+        if len(detection_indices) > 0:
+            # Time to detection is the first detection relative to fault start
+            ttd = (
+                float(
+                    (index[fault_start + detection_indices[0]] - index[fault_start])
+                    .astype("timedelta64[s]")
+                    .astype(float)
+                )
+                / 3600.0
+            )
+
+            ttds.append(ttd)
+        else:
+            ttds.append(None)  # No detection for this fault
+
+    return ttds
+
+
+def plot_scores(
+    t2: np.ndarray,
+    msre: np.ndarray,
+    fault_t2: np.ndarray,
+    fault_msre: np.ndarray,
+    threshold_t2: float,
+    threshold_msre: float,
+    labels: np.ndarray | None,
+    x_true: np.ndarray,
+    x_pred: np.ndarray,
+    title: str,
+    file_name: str,
+) -> None:
+    """Plots the ground truth label if not None, anomaly score and threshold,
+    and saves the figure."""
+
+    if labels is not None:
+        fig, (ax_label, ax_t2, ax_msre, ax_signal) = plt.subplots(
+            4, 1, sharex=True, gridspec_kw={"height_ratios": [1, 3, 3, 3]}, figsize=(12, 22)
+        )
+        ax_label.plot(labels, label="Ground truth")
+        ax_label.set_xlabel("Sample")
+        ax_label.set_yticks([0, 1])
+        ax_label.set_yticklabels(["Healthy", "Faulty"])
+        ax_label.legend()
+    else:
+        fig, (ax_t2, ax_msre, ax_signal) = plt.subplots(
+            3, 1, sharex=True, gridspec_kw={"height_ratios": [1, 1, 1]}, figsize=(12, 17)
+        )
+
+    ax_t2.plot(t2, label="T2")
+    for i, (start, end) in enumerate(
+        zip(np.where(np.diff(fault_t2, prepend=0) == 1)[0], np.where(np.diff(fault_t2, append=0) == -1)[0])
+    ):
+        ax_t2.axvspan(start, end, color="red", alpha=0.3, label="Detected fault" if i == 0 else None)
+    ax_t2.axhline(y=threshold_t2, linestyle="--", color="k", label="T2 threshold")
+    ax_t2.set_xlabel("Sample")
+    ax_t2.set_ylabel("T2")
+    ax_t2.legend()
+
+    ax_msre.plot(msre, label="MSRE")
+    for i, (start, end) in enumerate(
+        zip(np.where(np.diff(fault_msre, prepend=0) == 1)[0], np.where(np.diff(fault_msre, append=0) == -1)[0])
+    ):
+        ax_msre.axvspan(start, end, color="red", alpha=0.3, label="Detected fault" if i == 0 else None)
+    ax_msre.axhline(y=threshold_msre, linestyle="--", color="k", label="MSRE threshold")
+    ax_msre.set_xlabel("Sample")
+    ax_msre.set_ylabel("MSRE")
+    ax_msre.legend()
+
+    ax_signal.plot(x_true, label="Original signal")
+    ax_signal.plot(x_pred, label="Reconstruction")
+    ax_signal.set_xlabel("Sample")
+    ax_signal.legend()
+
+    fig.tight_layout(pad=1.5)
+    fig.suptitle(title, fontsize=18)
+    fig.subplots_adjust(top=0.95)
+    fig.savefig(file_name)
+
+
+def plot_score_and_contributions(
+    score: np.ndarray,
+    pred: np.ndarray,
+    threshold: float,
+    contributions: np.ndarray,
+    labels: np.ndarray | None,
+    index: np.ndarray,
+    features: list[str],
+    score_type: str,
+    title: str,
+    file_name: str,
+) -> None:
+    """Plots the ground truth label if not None, anomaly score, threshold and individual feature contributions,
+    and saves the figure."""
+
+    if labels is not None:
+        fig, (ax_label, ax_score, ax_contrib) = plt.subplots(
+            3, 1, sharex=True, gridspec_kw={"height_ratios": [1, 2, 8]}, figsize=(12, 22)
+        )
+        ax_label.plot(labels, label="Ground truth")
+        ax_label.set_xlabel("Time")
+        ax_label.set_yticks([0, 1])
+        ax_label.set_yticklabels(["Healthy", "Faulty"])
+        ax_label.legend()
+    else:
+        fig, (ax_score, ax_contrib) = plt.subplots(
+            2, 1, sharex=True, gridspec_kw={"height_ratios": [1, 4]}, figsize=(12, 18)
+        )
+
+    ax_score.plot(score, label=score_type)
+    for i, (start, end) in enumerate(
+        zip(np.where(np.diff(pred, prepend=0) == 1)[0], np.where(np.diff(pred, append=0) == -1)[0])
+    ):
+        ax_score.axvspan(start, end, color="red", alpha=0.3, label="Detected fault" if i == 0 else None)
+    ax_score.axhline(y=threshold, linestyle="--", color="k", label="Threshold")
+    ax_score.set_xlabel("Time")
+    ax_score.set_ylabel(score_type)
+    ax_score.legend()
+
+    ax_contrib.imshow(np.abs(contributions).T, aspect="auto", cmap="inferno", interpolation="none")
+    ax_contrib.set_xlabel("Time")
+    ax_contrib.set_ylabel("Features")
+    ax_contrib.set_yticks(ticks=np.arange(len(features)), labels=features)
+    x_ticks = np.linspace(start=0, stop=len(index) - 1, endpoint=True, num=20, dtype=int)
+    ax_contrib.set_xticks(x_ticks)
+    ax_contrib.set_xticklabels(np.datetime_as_string(index[x_ticks], unit="D"), rotation=45, ha="right")
+
+    fig.tight_layout(pad=1.5)
+    fig.suptitle(title, fontsize=18)
+    fig.subplots_adjust(top=0.95)
+    fig.savefig(file_name)

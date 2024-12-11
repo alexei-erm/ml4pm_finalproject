@@ -133,6 +133,7 @@ CFG["KPCAVG5"] = Config(
     model=ModelType.KPCA,
     model_cfg=None,
     features=[],
+    unit="VG5",
     operating_mode="all",
     window_size=1,
     measurement_downsampling=32,

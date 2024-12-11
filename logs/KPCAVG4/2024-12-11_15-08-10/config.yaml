@@ -1,0 +1,20 @@
+model:
+  _value_: KPCA
+  _name_: KPCA
+  _sort_order_: 5
+model_cfg: null
+features: []
+seed: 42
+unit: VG4
+operating_mode: all
+transient: false
+window_size: 1
+batch_size: 256
+epochs: 500
+learning_rate: 0.0001
+kl_divergence_weight: 0.0
+kl_divergence_rho: 0.05
+l1_weight: 0.0
+validation_split: 0.2
+subsampling: 10
+measurement_downsampling: 32
