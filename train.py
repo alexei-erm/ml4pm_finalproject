@@ -7,10 +7,8 @@ import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import RocCurveDisplay
 from sklearn.model_selection import train_test_split
-from sklearn.decomposition import PCA, KernelPCA, SparsePCA
-from sklearn.svm import OneClassSVM
+from sklearn.decomposition import KernelPCA
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
