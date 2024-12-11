@@ -191,7 +191,6 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
             # Evaluate model
             with torch.no_grad():
                 for x, y, index in tqdm(loader):
-                    x[y==1] += 0.5
                     xs.append(x)
                     labels.append(y)
                     indices.append(index)
