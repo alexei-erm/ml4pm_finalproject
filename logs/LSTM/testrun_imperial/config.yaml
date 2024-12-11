@@ -1,0 +1,27 @@
+model:
+  _value_: LSTMAE
+  _name_: LSTMAE
+  _sort_order_: 2
+model_cfg:
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.05
+  fc_hidden_sizes:
+  - 64
+  latent_sigmoid: true
+features:
+- water_circ_hot_06_tmp
+seed: 42
+unit: VG6
+operating_mode: turbine
+transient: false
+window_size: 16
+batch_size: 256
+epochs: 1000
+learning_rate: 0.0001
+kl_divergence_weight: 0.001
+kl_divergence_rho: 0.05
+l1_weight: 0.0
+validation_split: 0.2
+training_subsampling: 1
+measurement_downsampling: 16

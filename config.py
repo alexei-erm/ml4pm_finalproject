@@ -48,8 +48,8 @@ class Config:
     window_size: int = 256
     batch_size: int = 256
     epochs: int = 500
-    learning_rate: float = 1e-3
-    kl_divergence_weight: float = 0.0
+    learning_rate: float = 1e-4
+    kl_divergence_weight: float = 0.001
     kl_divergence_rho: float = 0.05
     l1_weight: float = 0.0
     validation_split: float = 0.2
@@ -92,10 +92,10 @@ CFG["Conv"] = Config(
 
 CFG["LSTM"] = Config(
     model=ModelType.LSTMAE,
-    model_cfg=LSTMAEConfig(hidden_size=32, num_layers=1, dropout=0.2, fc_hidden_sizes=[32], latent_sigmoid=False),
+    model_cfg=LSTMAEConfig(hidden_size=64, num_layers=2, dropout=0.1, fc_hidden_sizes=[64], latent_sigmoid=True),
     features=["stat_coil_ph01_01_tmp"],
-    window_size=32,
-    measurement_downsampling=32,
+    window_size=8,
+    measurement_downsampling=1,
 )
 CFG["LSTMSparse"] = inherit(
     CFG["LSTM"],

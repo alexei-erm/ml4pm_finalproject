@@ -193,7 +193,9 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
 
         with torch.no_grad():
             for x, y, index in tqdm(loader):
-                x[y == 1] += 0.5
+                # ramp = torch.linspace(0, 1, x.shape[1], device=device).unsqueeze(0).unsqueeze(-1).repeat(x.shape[0], 1, 1)
+                # mask = (y == 1).unsqueeze(-1)
+                # x[mask] += ramp[mask]
 
                 xs.append(x)
                 labels.append(y)
