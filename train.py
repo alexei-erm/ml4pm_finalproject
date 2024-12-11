@@ -259,7 +259,10 @@ def test_autoencoder(cfg: Config, dataset_root: str, log_dir: str, load_best: bo
     plt.show()
 
 
-def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
+def fit_spc(cfg: Config, dataset_root: str) -> None:
+    """Fits and evaluates a Statistical Process Control model based on the Hotelling T2 score"""
+
+    # Load training data
     parquet_file = os.path.abspath(
         os.path.join(dataset_root, f"{cfg.unit}_generator_data_training_measurements.parquet")
     )
@@ -268,23 +271,24 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
         operating_mode=cfg.operating_mode,
         transient=cfg.transient,
         window_size=cfg.window_size,
-        device=device,
+        device="cpu",
         features=cfg.features,
         downsampling=cfg.measurement_downsampling,
     )
 
+    # Shuffle dataset and subsample if necessary
     x_healthy = training_dataset.measurements.cpu().numpy()
     indices = np.arange(x_healthy.shape[0])
     np.random.shuffle(indices)
     x_healthy = x_healthy[indices[:: cfg.subsampling], :]
-    print(x_healthy.shape)
+    print(f"Fitting SPC model on healthy data of shape {x_healthy.shape}")
 
-    fig, axes = plt.subplots(1, 2)
-    fig2, axes2 = plt.subplots(2, 3)
-    axes2 = axes2.flatten()
+    # Compute T2 for training set and select threshold
+    t2, _ = hotelling_t2(train=x_healthy, test=x_healthy)
+    threshold = np.percentile(t2, 99.99)
 
-    for i, name in enumerate(["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]):
-        print(f"Testing on synthetic anomalies {name}")
+    for name in ["01_type_a", "01_type_b", "01_type_c", "02_type_a", "02_type_b", "02_type_c"]:
+        # Load anomalies
         dataset = SlidingDataset(
             parquet_file=os.path.join(dataset_root, "synthetic_anomalies", f"{cfg.unit}_anomaly_{name}.parquet"),
             operating_mode=cfg.operating_mode,
@@ -292,28 +296,48 @@ def fit_spc(cfg: Config, dataset_root: str, device: torch.device) -> None:
             window_size=cfg.window_size,
             features=cfg.features,
             downsampling=cfg.measurement_downsampling,
-            device=device,
+            device="cpu",
             mean=training_dataset.mean,
             std=training_dataset.std,
         )
 
-        x_test = dataset.measurements.cpu().numpy()
+        # Compute T2
+        t2, contributions = hotelling_t2(train=x_healthy, test=dataset.measurements.cpu().numpy())
+        plt.imshow(np.abs(contributions).T, aspect="auto", cmap="inferno")
+        plt.show()
+        exit()
 
-        t2 = hotelling_t2(train=x_healthy, test=x_test)
+        # Fault detection
+        pred = t2 >= threshold
 
         labels = dataset.ground_truth.cpu().numpy()
-        RocCurveDisplay.from_predictions(y_true=labels, y_pred=t2, ax=axes[0], name=name)
+        tpr, fpr = compute_tpr_fpr(pred=pred, labels=labels)
+        print(f"Synthetic anomalies {name}: TPR={tpr:.3f}, FPR={fpr:.3f}")
 
-        axes2[i].plot(labels, label="label")
-        t2 = t2.clip(max=t2.mean() + 3 * t2.std())
+        fig, ax = plt.subplots(2, 1, sharex=True, figsize=(12, 10))
+
+        for i, (start, end) in enumerate(
+            zip(np.where(np.diff(labels, prepend=0) == 1)[0], np.where(np.diff(labels, append=0) == -1)[0])
+        ):
+            ax[0].axvspan(start, end, color="red", alpha=0.3, label="Ground truth" if i == 0 else None)
+
+        t2 = clip_positive_outliers(t2, threshold=100.0)
         t2 = (t2 - t2.min()) / (t2.max() - t2.min())
-        axes2[i].plot(t2, label="T2")
-        axes2[i].legend()
-        axes2[i].set_title(name)
+        ax[0].plot(t2, label="T2")
+        ax[0].set_xlabel("Sample")
+        ax[0].set_ylabel("Normalized T2")
+        ax[0].legend()
 
-    axes[0].plot([0, 1], [0, 1], color="k", linestyle="--")
-    plt.legend()
-    plt.show()
+        for i, (start, end) in enumerate(
+            zip(np.where(np.diff(pred, prepend=0) == 1)[0], np.where(np.diff(pred, append=0) == -1)[0])
+        ):
+            ax[1].axvspan(start, end, color="orange", alpha=0.3, label="Detected fault" if i == 0 else None)
+        ax[1].set_xlabel("Sample")
+        ax[1].legend()
+
+        fig.tight_layout()
+        fig.suptitle(f"Anomaly T2 score and fault detection for synthetic anomalies {name}")
+        fig.savefig(f"plots/spc_{cfg.unit}_{name}")
 
 
 def fit_kpca(cfg: Config, dataset_root: str, log_dir: str) -> None:
@@ -589,6 +613,8 @@ def kneedle(x: np.ndarray, y: np.ndarray) -> int:
 
 
 def hotelling_t2(train: np.ndarray, test: np.ndarray) -> np.ndarray:
+    """Computes the Hotelling's T2 statistic and feature contributions for each test sample."""
+
     # Compute mean and covariance of the training data
     mean_vector = np.mean(train, axis=0)
     covariance_matrix = np.cov(train, rowvar=False)
@@ -602,7 +628,39 @@ def hotelling_t2(train: np.ndarray, test: np.ndarray) -> np.ndarray:
     # Center the test data by subtracting the mean of the training data
     centered_test = test - mean_vector
 
-    # Compute the T2 statistic for each test sample
-    t2_scores = np.sum((centered_test @ covariance_matrix_inv) * centered_test, axis=1)
+    # Compute feature contributions
+    feature_contributions = (centered_test @ covariance_matrix_inv) * centered_test
 
-    return t2_scores
+    # Compute the T2 statistic for each test sample
+    t2_scores = np.sum(feature_contributions, axis=1)
+
+    return t2_scores, feature_contributions
+
+
+def compute_tpr_fpr(pred: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
+    """Computes the True Positive Rate (TPR) and False Positive Rate (FPR)"""
+
+    # True Positives, False Positives, False Negatives, True Negatives
+    tp = np.sum((pred == 1) & (labels == 1))
+    fp = np.sum((pred == 1) & (labels == 0))
+    fn = np.sum((pred == 0) & (labels == 1))
+    tn = np.sum((pred == 0) & (labels == 0))
+
+    # Compute TPR and FPR
+    tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+    return tpr, fpr
+
+
+def clip_positive_outliers(input: np.ndarray, threshold=1.5) -> np.ndarray:
+    """Clips outliers from an array based on the interquartile range"""
+
+    # Compute Q1 and Q3
+    q1 = np.percentile(input, 25)
+    q3 = np.percentile(input, 75)
+    iqr = q3 - q1
+
+    # Compute bound and clip
+    upper_bound = q3 + threshold * iqr
+    return input.clip(max=upper_bound)

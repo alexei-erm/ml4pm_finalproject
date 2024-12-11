@@ -62,24 +62,6 @@ class SlidingDataset(Dataset):
             self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy(dtype=bool)).to(device)
             df.drop(columns="ground_truth", inplace=True)
 
-        # FIXME
-        # Reduce features
-        def aggregate(name: str, cols: str) -> pd.DataFrame:
-            matching_columns = df.columns[df.columns.str.match(cols)]
-            df[name] = df[matching_columns].max(axis=1)
-            df.drop(columns=matching_columns, inplace=True)
-            return df
-
-        """df = aggregate("stat_coil_agg", "stat_coil_.*")
-        df = aggregate("stat_magn_agg", "stat_magn_.*")
-        df = aggregate("current_agg", ".*_current")
-        df = aggregate("voltage_agg", ".*_voltage")
-        df = aggregate("air_circ_cold_agg", "air_circ_cold_.*")
-        df = aggregate("air_circ_hot_agg", "air_circ_hot_.*")
-        df = aggregate("water_circ_cold_agg", "water_circ_cold_.*")
-        df = aggregate("water_circ_hot_agg", "water_circ_hot_.*")
-        df.drop(columns=df.columns[df.columns.str.match("air_gap_.*")], inplace=True)"""
-
         # Select features
         if len(features) > 0:
             columns = []

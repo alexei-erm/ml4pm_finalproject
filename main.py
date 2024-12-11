@@ -29,7 +29,7 @@ def main(args: argparse.Namespace) -> None:
 
         seed_all(cfg.seed)
 
-        fit_spc(cfg=cfg, dataset_root=args.dataset_root, device=device)
+        fit_spc(cfg=cfg, dataset_root=args.dataset_root)
 
     elif args.train:
         run_name = args.run_name if args.run_name is not None else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -125,11 +125,11 @@ CFG["SPC"] = Config(
     features=[],
     operating_mode="all",
     window_size=1,
-    measurement_downsampling=16,
+    measurement_downsampling=1,
 )
 
 
-CFG["KPCA"] = Config(
+CFG["KPCAVG5"] = Config(
     model=ModelType.KPCA,
     model_cfg=None,
     features=[],
@@ -138,3 +138,5 @@ CFG["KPCA"] = Config(
     measurement_downsampling=32,
     subsampling=10,
 )
+CFG["KPCAVG6"] = inherit(CFG["KPCAVG5"], unit="VG6")
+CFG["KPCAVG4"] = inherit(CFG["KPCAVG5"], unit="VG4")
