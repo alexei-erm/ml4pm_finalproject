@@ -1,0 +1,49 @@
+model:
+  _value_: LSTMForecaster
+  _name_: LSTMForecaster
+  _sort_order_: 3
+model_cfg:
+  hidden_size: 128
+  num_layers: 2
+  target_feature: stat_coil_ph01_01_tmp
+features:
+- tot_activepower
+- ext_tmp
+- plant_tmp
+- charge
+- coupler_position
+- pump_calculated_flow
+- pump_pressure_diff
+- pump_rotspeed
+- tot_current
+- tot_effectivepower
+- tot_reactivepower
+- turbine_pressure
+- turbine_rotspeed
+- water_primary_pump_01_opening
+- water_primary_pump_02_opening
+- elec_freq
+- exc_current
+- exc_voltage
+- mid_voltage
+- stat_coil_ph01_01_tmp
+- water_circ_flow
+- air_gap_negative_x_position
+- air_gap_positive_x_position
+- air_gap_negative_y_position
+- air_gap_positive_y_position
+- total_injector_opening
+seed: 42
+unit: VG5
+operating_mode: turbine
+transient: false
+window_size: 32
+batch_size: 256
+epochs: 1
+learning_rate: 0.0001
+kl_divergence_weight: 0.0
+kl_divergence_rho: 0.05
+l1_weight: 0.0
+validation_split: 0.2
+training_subsampling: 1
+measurement_downsampling: 32

@@ -1,81 +1,106 @@
-from dataloader import SlidingDataset, create_dataloaders
-from model import ConvolutionalAutoencoder
-from train import train_autoencoder
-from utils import seed_all, select_device
+from train import *
+from utils import *
+from model import *
+from config import *
 
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
+import os
+from datetime import datetime
+import argparse
 
 
-def main() -> None:
-    seed_all(42)
+def override_config(cfg: Config, args: argparse.Namespace) -> Config:
+    for arg, value in args.__dict__.items():
+        if arg in cfg.__dict__ and value is not None:
+            cfg.__dict__[arg] = value
+    return cfg
 
-    device = select_device()
-    print(f"Using device: {device}")
 
-    window_size = 50
-    dataset = SlidingDataset(
-        unit="VG5", dataset_type="training", operating_mode="turbine", window_size=window_size, device=device
-    )
+def main(args: argparse.Namespace) -> None:
+    print("=" * os.get_terminal_size()[0])
+    print("")
+    device = torch.device("cpu") if args.cpu else select_device()
+    print(f"Device: {device}")
 
-    train_loader, val_loader = create_dataloaders(dataset, batch_size=256, validation_split=0.2)
+    log_root_dir = os.path.abspath(os.path.join("logs", args.config))
 
-    model = ConvolutionalAutoencoder(input_channels=dataset[0].size(0), input_length=window_size).to(device)
+    if CFG[args.config].model == ModelType.SPC:
+        cfg = CFG[args.config]
+        cfg = override_config(cfg, args)
 
-    if False:
-        train_autoencoder(model, train_loader, val_loader, n_epochs=100)
-    else:
-        model.load_state_dict(torch.load("models/best_model.pt", weights_only=True))
-        model.eval()
+        seed_all(cfg.seed)
 
-        """with torch.no_grad():
-            x = dataset[0].unsqueeze(0)
-            reconstruction = model(x)
-            x = x.cpu().numpy()
-            reconstruction = reconstruction.cpu().numpy()
-            fig, axes = plt.subplots(2, 1)
-            axes[0].plot(x[0, 0, :], label="x")
-            axes[0].plot(reconstruction[0, 0, :], label="pred")
-            axes[1].plot(x[0, 17, :], label="x")
-            axes[1].plot(reconstruction[0, 17, :], label="pred")
-            axes[0].legend()
-            axes[1].legend()
-            plt.show()"""
+        fit_spc(cfg=cfg, dataset_root=args.dataset_root)
 
-        dataset = SlidingDataset(
-            unit="VG5",
-            dataset_type="testing_synthetic_01",
-            operating_mode="turbine",
-            window_size=window_size,
-            device=device,
-        )
-        _, val_loader = create_dataloaders(dataset, batch_size=256, validation_split=0.9)
-        with torch.no_grad():
-            spes = []
-            for x in val_loader:
-                reconstruction = model(x)
-                spe = torch.sum(torch.square(reconstruction - x), dim=(1, 2))
-                spes.append(spe.cpu().numpy())
-                print((x.abs() > 5).sum())
-            spes = np.concatenate(spes)
-            print((spes > 5000.0).nonzero()[0])
-            x = dataset[9154].unsqueeze(0)
-            reconstruction = model(x)
-            x = x.cpu().numpy()
-            reconstruction = reconstruction.cpu().numpy()
-            fig, axes = plt.subplots(2, 1)
-            axes[0].plot(x[0, 34, :], label="x")
-            axes[0].plot(reconstruction[0, 0, :], label="pred")
-            axes[1].plot(x[0, 17, :], label="x")
-            axes[1].plot(reconstruction[0, 17, :], label="pred")
-            axes[0].legend()
-            axes[1].legend()
-            plt.show()
-            # fig, ax = plt.subplots()
-            # ax.hist(spes, bins=100)
-            # plt.show()
+    elif args.train:
+        run_name = args.run_name if args.run_name is not None else datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_dir = os.path.join(log_root_dir, run_name)
+        print(f"Saving model and logs to: {log_dir}")
+
+        cfg = CFG[args.config]
+        cfg = override_config(cfg, args)
+
+        seed_all(cfg.seed)
+
+        if "PCA" in cfg.model.value:
+            fit_kpca(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir)
+        else:
+            train_autoencoder(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, device=device)
+
+    elif args.eval:
+        run_name = args.run_name if args.run_name is not None else sorted(os.listdir(log_root_dir))[-1]
+        log_dir = os.path.join(log_root_dir, run_name)
+        print(f"Loading model from: {log_dir}")
+
+        # cfg = Config(**load_yaml(os.path.join(log_dir, "config.yaml")))
+        cfg = load_pickle(os.path.join(log_dir, "config.pkl"))
+        cfg = override_config(cfg, args)
+
+        seed_all(cfg.seed)
+
+        if "PCA" in cfg.model.value:
+            test_kpca(cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir)
+        else:
+            test_autoencoder(
+                cfg=cfg, dataset_root=args.dataset_root, log_dir=log_dir, load_best=args.best, device=device
+            )
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, help="Seed to use for all RNGs.")
+    parser.add_argument("--cpu", action="store_true", help="Use CPU for all Torch operations.")
+    parser.add_argument(
+        "--config", type=str, choices=CFG.keys(), default=list(CFG.keys())[0], help="Configuration to use."
+    )
+    parser.add_argument(
+        "--run_name", type=str, help="Explicit run name to use. By default, the run name is a timestamp."
+    )
+    parser.add_argument("--unit", type=str, choices=["VG4", "VG5", "VG6"], help="Plant unit to load data for.")
+    parser.add_argument(
+        "--operating_mode",
+        type=str,
+        choices=["pump", "turbine", "short_circuit", "all"],
+        help="Generator operating mode.",
+    )
+    parser.add_argument(
+        "--transient", action="store_true", default=None, help="Include transient (non equilibrium) samples."
+    )
+    parser.add_argument(
+        "--features", nargs="+", help="Feature(s) to use for model input. By default, uses all features."
+    )
+    parser.add_argument(
+        "--dataset_root", type=str, default="Dataset", help="Root path of the folder to load the datasets from."
+    )
+    parser.add_argument("--epochs", type=int, help="Number of epochs.")
+    parser.add_argument("--subsampling", type=int, help="Subsampling for training samples.")
+    parser.add_argument(
+        "--best",
+        action="store_true",
+        help="Load the model with the lowest validation loss. By default, loads the last model saved while training.",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--train", action="store_true", help="Train the model.")
+    group.add_argument("--eval", action="store_true", help="Evaluate the model.")
+    args = parser.parse_args()
+
+    main(args)

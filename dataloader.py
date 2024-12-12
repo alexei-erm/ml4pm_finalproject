@@ -2,44 +2,45 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler, SequentialSampler
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 
 
 class SlidingDataset(Dataset):
     def __init__(
         self,
-        unit: Literal["VG4", "VG5", "VG6"],
-        dataset_type: Literal["training", "testing_synthetic_01", "testing_synthetic_02", "testing_real"],
-        operating_mode: Literal["turbine", "pump", "short_circuit"],
-        equilibrium: bool = True,
-        dataset_folder: str = "Dataset",
-        window_size: int = 50,
-        device: torch.device = torch.device("cpu"),
+        parquet_file: str,
+        operating_mode: Literal["turbine", "pump", "short_circuit", "all"],
+        transient: bool,
+        window_size: int,
+        features: list[str],
+        downsampling: int,
+        device: torch.device,
+        mean: torch.Tensor | None = None,
+        std: torch.Tensor | None = None,
     ) -> None:
-        assert window_size >= 1
+
         self.window_size = window_size
         self.device = device
 
         # Load file
-        pq_path = f"{dataset_folder}/{unit}_generator_data_{dataset_type}_measurements.parquet"
-        df = pd.read_parquet(pq_path)
+        df = pd.read_parquet(parquet_file)
 
         # Filter operating mode
-        if equilibrium:
-            df = df[df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
+        if transient:
+            if operating_mode == "all":
+                df = df[df["machine_on"]]
+            else:
+                df = df[df["machine_on"] & df[f"{operating_mode}_mode"]]
         else:
-            df = df[df[f"{operating_mode}_mode"]]
+            if operating_mode == "all":
+                df = df[df["machine_on"] & ~df["dyn_only_on"]]
+            else:
+                df = df[df["machine_on"] & df[f"equilibrium_{operating_mode}_mode"] & ~df["dyn_only_on"]]
 
         # Remove operating mode variables from data
-        operating_mode_vars = [
+        operating_mode_vars = [var for var in df.columns if "mode" in var] + [
             "machine_on",
             "machine_off",
-            "turbine_mode",
-            "equilibrium_turbine_mode",
-            "pump_mode",
-            "equilibrium_pump_mode",
-            "short_circuit_mode",
-            "equilibrium_short_circuit_mode",
             "dyn_only_on",
             "all",
         ]
@@ -51,44 +52,111 @@ class SlidingDataset(Dataset):
         df.drop(columns=df.columns[injector_columns_mask], inplace=True)
         df["total_injector_opening"] = total_injector_opening
 
-        # Compute subsequence indices
-        valid_end_indices = (
-            df.index.to_series()
-            .diff(periods=self.window_size - 1)
-            .eq((self.window_size - 1) * pd.Timedelta(seconds=30))
+        # Downsample
+        if downsampling > 1:
+            df = downsample(df, period=downsampling * pd.Timedelta(seconds=30))
+
+        # If the dataset contains labels, separate them from the measurement data
+        if "ground_truth" in df.columns:
+            df.loc[df["ground_truth"] > 0, "ground_truth"] = 1
+            self.ground_truth = torch.from_numpy(df["ground_truth"].to_numpy(dtype=bool)).to(device)
+            df.drop(columns="ground_truth", inplace=True)
+
+        # Select features
+        if len(features) > 0:
+            columns = []
+            for feature in features:
+                matching_columns = df.columns[df.columns.to_series().str.match(feature)].to_list()
+                if len(matching_columns) == 0:
+                    print(f"Selected feature '{feature}' does not match any feature in the dataset.")
+                    exit()
+                columns += matching_columns
+            df = df[columns]
+
+        # Save filtered dataframe
+        self.df = df.copy()
+        self.index = df.index.values.copy()
+
+        # Compute subsequence indices according to window size
+        valid_end_indices = df.index.to_series().diff(periods=window_size - 1) == (
+            (window_size - 1) * downsampling * pd.Timedelta(seconds=30)
         )
-        start_indices = np.nonzero(valid_end_indices)[0] - self.window_size + 1
+        start_indices = np.nonzero(valid_end_indices)[0] - window_size + 1
         self.start_indices = torch.from_numpy(start_indices)
 
         # Convert to tensor and normalize
-        self.measurements = torch.from_numpy(df.to_numpy().astype(np.float32)).to(device)
-        self.measurements = self.measurements.T
-        mean = self.measurements.mean(dim=1, keepdim=True)
-        std = self.measurements.std(dim=1, keepdim=True)
-        self.measurements = torch.where(std > 0, (self.measurements - mean) / std, self.measurements)
+        self.measurements = torch.from_numpy(df.to_numpy(dtype=np.float32)).to(device)
+        self.mean = mean if mean is not None else self.measurements.mean(dim=0)
+        self.std = std if std is not None else self.measurements.std(dim=0)
+        self.measurements = torch.where(
+            self.std.reshape(1, -1) > 0,
+            (self.measurements - self.mean.reshape(1, -1)) / self.std.reshape(1, -1),
+            self.measurements,
+        )
 
     def __len__(self) -> int:
         return len(self.start_indices)
 
-    def __getitem__(self, idx: int) -> torch.tensor:
-        start_index = self.start_indices[idx]
-        return self.measurements[:, start_index : start_index + self.window_size]
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor | None, np.ndarray]:
+        start_index = self.start_indices[index]
+        end_index = start_index + self.window_size
+        ground_truth = self.ground_truth[start_index:end_index] if hasattr(self, "ground_truth") else None
+        return (
+            self.measurements[start_index:end_index, :],
+            ground_truth,
+            self.index[start_index:end_index],
+        )
 
 
-def create_dataloaders(
-    dataset: Dataset, batch_size: int = 256, validation_split: float = 0.2
+def downsample(df: pd.DataFrame, period: pd.Timedelta) -> pd.DataFrame:
+    """Downsamples a dataframe with timestamp index, handling gaps."""
+
+    # Identify large gaps
+    large_gaps = df.index.to_series().diff() > period
+    group = large_gaps.cumsum()
+
+    # Downsample each group separately
+    downsampled = []
+    for group_id, group_data in df.groupby(group):
+        downsampled_group = group_data.resample(period, closed="right", label="right").mean()
+        downsampled.append(downsampled_group)
+
+    # Combine all downsampled groups
+    return pd.concat(downsampled)
+
+
+def collate_fn(batch):
+    x, label, index = zip(*batch)
+    x = torch.stack(x)
+    label = torch.stack(label) if label[0] is not None else None
+    index = np.stack(index)
+    return x, label, index
+
+
+def create_train_val_dataloaders(
+    dataset: Dataset, batch_size: int, validation_split: float, subsampling: int = 1
 ) -> tuple[DataLoader, DataLoader]:
     """Creates train/validation DataLoaders"""
 
-    num_samples = len(dataset)
-    validation_size = int(validation_split * num_samples)
-    indices = np.arange(num_samples)
+    indices = np.arange(len(dataset))
     np.random.shuffle(indices)
+    indices = indices[::subsampling]
+    validation_size = int(validation_split * len(indices))
     train_indices = indices[:-validation_size]
     validation_indices = indices[-validation_size:]
 
-    train_loader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices))
-    # FIXME
-    validation_loader = DataLoader(dataset, batch_size=batch_size, sampler=SequentialSampler(validation_indices))
+    train_loader = DataLoader(
+        dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices), collate_fn=collate_fn
+    )
+
+    validation_loader = DataLoader(
+        dataset, batch_size=batch_size, sampler=SubsetRandomSampler(validation_indices), collate_fn=collate_fn
+    )
 
     return train_loader, validation_loader
+
+
+def create_dataloader(dataset: Dataset, batch_size: int) -> DataLoader:
+    """Creates non-shuffled DataLoader"""
+
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
