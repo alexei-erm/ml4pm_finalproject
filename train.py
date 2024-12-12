@@ -46,6 +46,9 @@ def train_autoencoder(cfg: Config, dataset_root: str, log_dir: str, device: torc
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
     criterion = nn.MSELoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
+    )
 
     writer = SummaryWriter(log_dir=log_dir, flush_secs=10)
 
@@ -89,6 +92,7 @@ def train_autoencoder(cfg: Config, dataset_root: str, log_dir: str, device: torc
         total_kl_loss /= len(train_loader)
         total_l1_loss /= len(train_loader)
 
+        # Validation phase
         model.eval()
 
         total_val_loss = 0.0
